@@ -1,0 +1,412 @@
+// The orbit: a sun (mission pool), HUD rings, agent orbs and tool stations on <canvas>.
+// Light theme: glows use multiply / soft alpha so nothing washes out on paper.
+import { subscribe, getState, agents, agentById } from './store.js';
+import { rgbOf, rgba, hueOf, stationFor, STATIONS, truncate, statusLabel } from './format.js';
+import { h, showTip, hideTip } from './dom.js';
+
+const TAU = Math.PI * 2;
+const MONO = '"Geist Mono", "Cascadia Mono", Consolas, monospace';
+const SERIF = '"Instrument Serif", "Iowan Old Style", Georgia, serif';
+
+export function createOrbit(canvas, { onFocus } = {}) {
+  const ctx = canvas.getContext('2d');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  const INK = rgbOf('ink'), PAPER = rgbOf('paper'), SUN = rgbOf('sun'), CORAL = rgbOf('coral');
+  let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0, sunR = 30;
+  let active = false, raf = 0, last = 0, clock = 0, sunFlare = -9, layer = null;
+  const orbs = new Map();         // agent_id -> orb state
+  const particles = [], ripples = [];
+  const pulses = {};              // station -> { t, rgb }
+  const callStation = new Map();  // call_id -> station
+  let hoverId = null, mouse = null;
+
+  // ---------- geometry ----------
+  function stationPos(name) {
+    const i = Math.max(0, STATIONS.indexOf(name));
+    const a = -Math.PI / 2 + (i / STATIONS.length) * TAU;
+    return { x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, a };
+  }
+  function layoutOrbs() {
+    const list = agents();
+    const seen = new Set();
+    const r0 = sunR * 2.1, r1 = R * 0.8;
+    list.forEach((a, i) => {
+      seen.add(a.id);
+      let o = orbs.get(a.id);
+      if (!o) { o = { id: a.id, angle: (i * 2.399) % TAU, energy: 0, kick: 0, lastThink: 0, lastTalk: 0, x: cx, y: cy, r: 6 }; orbs.set(a.id, o); }
+      o.radius = list.length === 1 ? (r0 + r1) / 2 : r0 + (r1 - r0) * (i / (list.length - 1));
+      o.speed = (0.06 + 0.018 * (i % 3)) * (i % 2 ? 0.85 : 1);
+      o.rgb = rgbOf(hueOf(a));
+    });
+    for (const id of Array.from(orbs.keys())) if (!seen.has(id)) orbs.delete(id);
+  }
+
+  function resize() {
+    const box = canvas.parentElement.getBoundingClientRect();
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = Math.max(10, box.width); H = Math.max(10, box.height);
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    const foot = H > 420 ? 74 : 56; // room for the stats row under the orbit
+    cx = W / 2; cy = (H - foot) / 2 + 4;
+    R = Math.max(60, Math.min((W - 112) / 2, (H - foot - 64) / 2)); // side room for station labels
+    sunR = Math.max(22, Math.min(44, R * 0.15));
+    buildLayer(); layoutOrbs();
+    if (!active) draw();
+  }
+
+  // Static HUD: rotating tick ring and degree labels, drawn once per resize.
+  function buildLayer() {
+    const size = Math.ceil((R + 4) * 2 * dpr);
+    layer = document.createElement('canvas');
+    layer.width = layer.height = size;
+    const c = layer.getContext('2d');
+    c.scale(dpr, dpr);
+    const o = R + 2;
+    c.translate(o, o);
+    for (let d = 0; d < 360; d += 2) {
+      const a = (d * Math.PI) / 180;
+      const len = d % 30 === 0 ? 11 : d % 10 === 0 ? 7 : 3.5;
+      c.strokeStyle = rgba(INK, d % 30 === 0 ? 0.26 : d % 10 === 0 ? 0.17 : 0.1);
+      c.lineWidth = d % 30 === 0 ? 1.1 : 0.8;
+      c.beginPath();
+      c.moveTo(Math.cos(a) * (R - len), Math.sin(a) * (R - len));
+      c.lineTo(Math.cos(a) * R, Math.sin(a) * R);
+      c.stroke();
+    }
+    c.fillStyle = rgba(INK, 0.26);
+    c.font = `500 8.5px ${MONO}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (let d = 0; d < 360; d += 30) {
+      const a = (d * Math.PI) / 180 - Math.PI / 2;
+      c.fillText(String(d).padStart(3, '0'), Math.cos(a) * (R - 21), Math.sin(a) * (R - 21));
+    }
+  }
+
+  // ---------- events -> motion ----------
+  const orbPos = (id) => { const o = orbs.get(id); return o ? { x: o.x, y: o.y } : { x: cx, y: cy }; };
+  function spark(from, to, rgb, opts = {}) {
+    if (reduce.matches) { if (opts.arrive) opts.arrive(); return; }
+    if (particles.length > 80) particles.shift();
+    particles.push({ from, to, rgb, t: 0, dur: opts.dur || 0.95, size: opts.size || 1, arrive: opts.arrive, bend: (Math.random() < 0.5 ? -1 : 1) * (0.18 + Math.random() * 0.12) });
+  }
+  const pulse = (station, rgb) => { pulses[station] = { t: clock, rgb }; };
+
+  function onEvent(ev) {
+    const o = orbs.get(ev.agent_id);
+    if (!o) return;
+    const d = ev.data || {};
+    o.kick = 1; o.lastEv = clock;
+    const rgb = o.rgb;
+    switch (ev.type) {
+      case 'run.tool_call': {
+        const st = stationFor(d.tool);
+        if (d.call_id) callStation.set(d.call_id, st);
+        if (callStation.size > 400) callStation.delete(callStation.keys().next().value);
+        spark(() => orbPos(o.id), () => stationPos(st), rgb, { arrive: () => pulse(st, rgb) });
+        break;
+      }
+      case 'run.tool_result': {
+        const st = callStation.get(d.call_id) || 'tool';
+        const bad = d.status === 'error' || d.error;
+        spark(() => stationPos(st), () => orbPos(o.id), bad ? CORAL : rgb, { arrive: () => { o.kick = 1; if (bad) ripples.push({ id: o.id, t: clock, rgb: CORAL }); } });
+        break;
+      }
+      case 'run.thinking':
+        if (clock - o.lastThink > 1.2) { o.lastThink = clock; ripples.push({ id: o.id, t: clock, rgb }); }
+        if (clock - (o.lastThinkSpark || -9) > 3) { o.lastThinkSpark = clock; spark(() => orbPos(o.id), () => stationPos('think'), rgb, { size: 0.7, arrive: () => pulse('think', rgb) }); }
+        break;
+      case 'run.text':
+        if (clock - o.lastTalk > 2) { o.lastTalk = clock; spark(() => orbPos(o.id), () => stationPos('talk'), rgb, { size: 0.8, arrive: () => pulse('talk', rgb) }); }
+        break;
+      case 'run.final':
+        spark(() => orbPos(o.id), () => ({ x: cx, y: cy }), SUN, { size: 1.8, dur: 1.2, arrive: () => { sunFlare = clock; } });
+        break;
+      case 'run.error':
+        ripples.push({ id: o.id, t: clock, rgb: CORAL });
+        break;
+      case 'plan.proposed': case 'human.note': case 'human.approved':
+        pulse('plan', SUN);
+        break;
+      default: break;
+    }
+    if (ripples.length > 40) ripples.shift();
+    if (!active) draw();
+  }
+
+  // ---------- drawing ----------
+  function working(agentId) {
+    const ms = getState().missions;
+    for (const id in ms) { const m = ms[id]; if (m.agent_id === agentId && (m.status === 'running' || m.status === 'planning')) return true; }
+    return false;
+  }
+  function needs(agentId) {
+    const ms = getState().missions;
+    for (const id in ms) { const m = ms[id]; if (m.agent_id === agentId && m.status === 'awaiting_approval') return 'needs'; }
+    return null;
+  }
+  const bez = (p0, p1, bend, t) => {
+    const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+    const nx = -(p1.y - p0.y) * bend, ny = (p1.x - p0.x) * bend;
+    const qx = mx + nx + (cx - mx) * 0.25, qy = my + ny + (cy - my) * 0.25;
+    const u = 1 - t;
+    return { x: u * u * p0.x + 2 * u * t * qx + t * t * p1.x, y: u * u * p0.y + 2 * u * t * qy + t * t * p1.y };
+  };
+  function glow(x, y, r, rgb, a) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, rgba(rgb, a)); g.addColorStop(1, rgba(rgb, 0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  }
+
+  function draw() {
+    const t = clock;
+    const focus = getState().ui.focusAgent;
+    const running = Object.values(getState().missions).filter((m) => m.status === 'running' || m.status === 'planning').length;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    // sunlight bloom + slow sweep
+    ctx.globalCompositeOperation = 'source-over';
+    glow(cx, cy, R * 1.05, SUN, 0.10 + Math.min(0.08, running * 0.02));
+    if (ctx.createConicGradient) {
+      const sweep = reduce.matches ? -0.6 : t * 0.26;
+      const g = ctx.createConicGradient(sweep, cx, cy);
+      g.addColorStop(0, rgba(SUN, 0)); g.addColorStop(0.075, rgba(SUN, 0.075)); g.addColorStop(0.095, rgba(SUN, 0)); g.addColorStop(1, rgba(SUN, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 0.97, 0, TAU); ctx.fill();
+    }
+
+    // rings
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = rgba(INK, 0.13); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+    ctx.setLineDash([2, 6]); ctx.strokeStyle = rgba(INK, 0.1);
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.9, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = rgba(INK, 0.05);
+    ctx.beginPath(); ctx.moveTo(cx - R * 0.88, cy); ctx.lineTo(cx - sunR * 1.7, cy); ctx.moveTo(cx + sunR * 1.7, cy); ctx.lineTo(cx + R * 0.88, cy);
+    ctx.moveTo(cx, cy - R * 0.88); ctx.lineTo(cx, cy - sunR * 1.7); ctx.moveTo(cx, cy + sunR * 1.7); ctx.lineTo(cx, cy + R * 0.88); ctx.stroke();
+    if (layer) {
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(reduce.matches ? 0 : t * 0.012);
+      ctx.drawImage(layer, -(R + 2), -(R + 2), layer.width / dpr, layer.height / dpr); ctx.restore();
+    }
+    // inner tick ring around the sun, counter-rotating
+    ctx.strokeStyle = rgba(INK, 0.14); ctx.lineWidth = 0.8;
+    const ir = sunR * 1.5, rot = reduce.matches ? 0 : -t * 0.05;
+    ctx.beginPath();
+    for (let i = 0; i < 60; i++) { const a = rot + (i / 60) * TAU, l = i % 5 ? 2.5 : 5; ctx.moveTo(cx + Math.cos(a) * ir, cy + Math.sin(a) * ir); ctx.lineTo(cx + Math.cos(a) * (ir + l), cy + Math.sin(a) * (ir + l)); }
+    ctx.stroke();
+
+    // agent orbit guides + trails
+    for (const o of orbs.values()) {
+      const dim = focus && focus !== o.id;
+      ctx.strokeStyle = rgba(o.rgb, dim ? 0.06 : focus === o.id ? 0.42 : 0.1 + o.energy * 0.12);
+      ctx.lineWidth = focus === o.id ? 1.3 : 1;
+      ctx.beginPath(); ctx.arc(cx, cy, o.radius, 0, TAU); ctx.stroke();
+      if (o.energy > 0.05 && !dim) {
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 10; i++) {
+          const a0 = o.angle - (i + 1) * 0.07 * o.dir, a1 = o.angle - i * 0.07 * o.dir;
+          ctx.strokeStyle = rgba(o.rgb, (1 - i / 10) * 0.5 * o.energy); ctx.lineWidth = 2.6 * (1 - i / 12);
+          ctx.beginPath(); ctx.arc(cx, cy, o.radius, Math.min(a0, a1), Math.max(a0, a1)); ctx.stroke();
+        }
+        ctx.lineCap = 'butt';
+      }
+    }
+
+    // stations
+    ctx.textBaseline = 'middle';
+    for (const name of STATIONS) {
+      const p = stationPos(name), pl = pulses[name];
+      const age = pl ? t - pl.t : 9;
+      if (age < 1.4) {
+        const k = age / 1.4;
+        ctx.strokeStyle = rgba(pl.rgb, 0.55 * (1 - k)); ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 6 + k * 18, 0, TAU); ctx.stroke();
+        glow(p.x, p.y, 20, pl.rgb, 0.35 * (1 - k));
+      }
+      ctx.fillStyle = age < 1.4 ? rgba(pl.rgb, 1) : rgba(PAPER, 1);
+      ctx.strokeStyle = rgba(INK, 0.32); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4.2, 0, TAU); ctx.fill(); ctx.stroke();
+      const lx = cx + Math.cos(p.a) * (R + 17), ly = cy + Math.sin(p.a) * (R + 17);
+      ctx.font = `500 9.5px ${MONO}`;
+      ctx.textAlign = Math.abs(Math.cos(p.a)) < 0.3 ? 'center' : Math.cos(p.a) > 0 ? 'left' : 'right';
+      ctx.fillStyle = rgba(INK, age < 1.4 ? 0.75 : 0.42);
+      spaced(name.toUpperCase(), lx, ly);
+    }
+
+    // sun core
+    const flare = Math.max(0, 1 - (t - sunFlare) / 1.6);
+    const breath = reduce.matches ? 0 : Math.sin(t * 1.3) * 0.5 + 0.5;
+    ctx.globalCompositeOperation = 'multiply';
+    glow(cx, cy, sunR * (2.6 + breath * 0.3 + flare * 1.6), SUN, 0.28 + flare * 0.3);
+    glow(cx, cy, sunR * 1.6, CORAL, 0.14 + flare * 0.15);
+    ctx.globalCompositeOperation = 'source-over';
+    const core = ctx.createRadialGradient(cx - sunR * 0.35, cy - sunR * 0.4, sunR * 0.05, cx, cy, sunR);
+    core.addColorStop(0, rgba([255, 247, 226], 1)); core.addColorStop(0.42, rgba(SUN, 1)); core.addColorStop(1, rgba(CORAL, 1));
+    ctx.fillStyle = core; ctx.beginPath(); ctx.arc(cx, cy, sunR, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, sunR * 0.8, 0, TAU); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.97)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `italic 400 ${Math.round(sunR * 1.15)}px ${SERIF}`;
+    ctx.fillText(String(running), cx, cy + sunR * 0.06);
+    ctx.font = `500 9px ${MONO}`; ctx.fillStyle = rgba(INK, 0.45);
+    spaced('IN SESSION', cx, cy + sunR + 16);
+
+    // particles
+    for (const p of particles) {
+      const p0 = p.from(), p1 = p.to();
+      for (let i = 6; i >= 0; i--) {
+        const tt = Math.max(0, p.t - i * 0.035);
+        const q = bez(p0, p1, p.bend, ease(tt));
+        ctx.fillStyle = rgba(p.rgb, i ? 0.32 * (1 - i / 7) : 1);
+        ctx.beginPath(); ctx.arc(q.x, q.y, (i ? 2.1 - i * 0.2 : 2.8) * p.size, 0, TAU); ctx.fill();
+      }
+      const head = bez(p0, p1, p.bend, ease(p.t));
+      ctx.globalCompositeOperation = 'multiply'; glow(head.x, head.y, 12 * p.size, p.rgb, 0.4); ctx.globalCompositeOperation = 'source-over';
+    }
+    // ripples
+    for (const r of ripples) {
+      const o = orbs.get(r.id); if (!o) continue;
+      const k = (t - r.t) / 1.8;
+      if (k > 1) continue;
+      ctx.strokeStyle = rgba(r.rgb, 0.5 * (1 - k)); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(o.x, o.y, o.r + 4 + k * 26, 0, TAU); ctx.stroke();
+    }
+
+    // orbs
+    const acts = getState().act.agents;
+    for (const o of orbs.values()) {
+      const dim = focus && focus !== o.id;
+      const a = dim ? 0.38 : 1;
+      const r = o.r;
+      ctx.globalAlpha = a;
+      ctx.globalCompositeOperation = 'multiply';
+      glow(o.x, o.y, r * (2.4 + o.energy * 2.6 + o.kick), o.rgb, 0.16 + o.energy * 0.32);
+      ctx.globalCompositeOperation = 'source-over';
+      const g = ctx.createRadialGradient(o.x - r * 0.35, o.y - r * 0.4, r * 0.08, o.x, o.y, r);
+      g.addColorStop(0, 'rgba(255,255,255,.96)');
+      g.addColorStop(0.4, rgba(o.rgb, 0.55 + o.energy * 0.45));
+      g.addColorStop(1, rgba(o.rgb.map((c) => c * 0.78), 0.7 + o.energy * 0.3));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, TAU); ctx.fill();
+      const flag = needs(o.id);
+      if (flag) {
+        ctx.setLineDash([3, 4]); ctx.lineDashOffset = -t * 8; ctx.strokeStyle = rgba(SUN, 0.95); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(o.x, o.y, r + 5, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+      }
+      if (hoverId === o.id || focus === o.id) {
+        ctx.strokeStyle = rgba(o.rgb, 0.8); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(o.x, o.y, r + 8, 0, TAU); ctx.stroke();
+      }
+      // action label
+      const act = acts[o.id];
+      if ((o.energy > 0.5 || focus === o.id) && act && act.now && !dim) label(o, truncate(act.now, 38));
+      ctx.globalAlpha = 1;
+    }
+  }
+  function spaced(text, x, y) {
+    if ('letterSpacing' in ctx) { ctx.letterSpacing = '1.4px'; ctx.fillText(text, x, y); ctx.letterSpacing = '0px'; }
+    else ctx.fillText(text, x, y);
+  }
+  function label(o, text) {
+    const dx = o.x - cx, dy = o.y - cy, len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    ctx.font = `500 10.5px ${MONO}`;
+    const hh = 20, ax = o.x + ux * (o.r + 14);
+    // prefer the outward side; flip if there is no room; then trim the text to what fits
+    let right = ux >= 0;
+    if ((right ? W - ax : ax) < 110) right = !right;
+    const room = Math.max(60, (right ? W - ax : ax) - 8);
+    while (text.length > 6 && ctx.measureText(text).width + 16 > room) text = text.slice(0, -2).trimEnd() + '…';
+    const w = ctx.measureText(text).width + 16;
+    let x = right ? ax : ax - w, y = o.y + uy * (o.r + 14) - hh / 2;
+    x = Math.max(4, Math.min(W - w - 4, x)); y = Math.max(4, Math.min(H - hh - 4, y));
+    ctx.fillStyle = rgba(PAPER, 0.88); ctx.strokeStyle = rgba(o.rgb, 0.35); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, hh, 10) : ctx.rect(x, y, w, hh); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = rgba(o.rgb, 1); ctx.beginPath(); ctx.arc(x + 8, y + hh / 2, 2.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = rgba(INK, 0.72); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + 14, y + hh / 2 + 0.5);
+  }
+  const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+
+  // ---------- update loop ----------
+  function update(dt) {
+    clock += dt;
+    for (const o of orbs.values()) {
+      const work = working(o.id) || clock - (o.lastEv || -99) < 6;
+      o.energy += ((work ? 1 : 0) - o.energy) * Math.min(1, dt * 1.6);
+      o.kick = Math.max(0, o.kick - dt * 1.8);
+      o.dir = 1;
+      if (!reduce.matches) o.angle = (o.angle + o.speed * (1 + o.energy * 0.8) * dt) % TAU;
+      const breath = reduce.matches ? 0 : (Math.sin(clock * 2.2 + o.radius) * 0.5 + 0.5) * o.energy;
+      o.r = 5 + o.energy * 3.5 + breath * 1.4 + o.kick * 1.6;
+      o.x = cx + Math.cos(o.angle) * o.radius; o.y = cy + Math.sin(o.angle) * o.radius;
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.t += dt / p.dur;
+      if (p.t >= 1) { particles.splice(i, 1); if (p.arrive) p.arrive(); }
+    }
+    while (ripples.length && clock - ripples[0].t > 2) ripples.shift();
+  }
+  function busy() { return particles.length || ripples.length || Array.from(orbs.values()).some((o) => o.energy > 0.05); }
+  function frame(ts) {
+    raf = requestAnimationFrame(frame);
+    const minGap = reduce.matches ? 160 : busy() ? 24 : 48; // ~40 fps when busy, ~20 idle
+    if (ts - last < minGap) return;
+    const dt = last ? Math.min(0.1, (ts - last) / 1000) : 0.016;
+    last = ts;
+    update(dt); draw();
+  }
+  function setActive(on) {
+    on = on && !document.hidden;
+    if (on === active) return;
+    active = on;
+    cancelAnimationFrame(raf); last = 0;
+    if (on) raf = requestAnimationFrame(frame);
+  }
+
+  // ---------- pointer ----------
+  function hit(x, y) {
+    let best = null, bd = 18;
+    for (const o of orbs.values()) { const d = Math.hypot(o.x - x, o.y - y); if (d < bd) { bd = d; best = o; } }
+    return best;
+  }
+  canvas.addEventListener('mousemove', (e) => {
+    const b = canvas.getBoundingClientRect();
+    mouse = { x: e.clientX - b.left, y: e.clientY - b.top };
+    const o = hit(mouse.x, mouse.y);
+    hoverId = o ? o.id : null;
+    canvas.style.cursor = o || Math.hypot(mouse.x - cx, mouse.y - cy) < sunR ? 'pointer' : 'default';
+    if (!o) { hideTip(); return; }
+    const a = agentById(o.id) || {};
+    const act = getState().act.agents[o.id];
+    const m = Object.values(getState().missions).find((x) => x.agent_id === o.id && x.status !== 'done' && x.status !== 'stopped' && x.status !== 'failed');
+    const model = getState().models[a.model_id];
+    showTip(e.clientX, e.clientY,
+      h('div', { class: 'tip-title', 'data-hue': hueOf(a) }, h('span.dot'), a.name || 'agent', h('span.faint', { style: { fontWeight: 400 } }, a.role ? ' · ' + a.role : '')),
+      h('div.tip-line', null, m ? `${statusLabel(m.status)} · ${truncate(m.title, 60)}` : 'idle'),
+      act ? h('div.tip-line', null, truncate(act.now, 140)) : null,
+      h('div.tip-line', null, `${model ? model.name : 'no model'} · ${a.harness || ''}`));
+  });
+  canvas.addEventListener('mouseleave', () => { hoverId = null; hideTip(); });
+  canvas.addEventListener('click', (e) => {
+    const b = canvas.getBoundingClientRect();
+    const x = e.clientX - b.left, y = e.clientY - b.top;
+    const o = hit(x, y);
+    if (o) onFocus && onFocus(getState().ui.focusAgent === o.id ? null : o.id);
+    else if (Math.hypot(x - cx, y - cy) < sunR * 1.3) onFocus && onFocus(null);
+  });
+
+  const ro = new ResizeObserver(() => resize());
+  ro.observe(canvas.parentElement);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { buildLayer(); if (!active) draw(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) setActive(false); else if (wantActive) setActive(true); });
+  let wantActive = false;
+
+  subscribe('reset', () => { layoutOrbs(); if (!active) draw(); });
+  subscribe('agents', () => { layoutOrbs(); if (!active) draw(); });
+  subscribe('run', ({ ev, live }) => { if (live && active) onEvent(ev); });
+  subscribe('ui', () => { if (!active) draw(); });
+  resize();
+
+  return {
+    setActive(on) { wantActive = on; setActive(on); },
+  };
+}

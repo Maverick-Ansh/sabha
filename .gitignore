@@ -1,0 +1,6 @@
+sabha_data/
+sabha_data_*/
+__pycache__/
+*.pyc
+node_modules/
+.cloudflared/

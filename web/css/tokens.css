@@ -1,0 +1,77 @@
+/* Sabha design tokens: "daylight mission control".
+   Every colour in the app comes from here. JS reads the *-rgb triplets for canvas work. */
+:root {
+  /* paper and ink */
+  --paper: #FAF7F2;
+  --paper-2: #F3EEE6;
+  --paper-rgb: 250, 247, 242;
+  --card: rgba(255, 255, 255, .72);
+  --card-solid: #FFFDF9;
+  --card-strong: rgba(255, 255, 255, .9);
+  --ink: #1D1B16;
+  --ink-2: #6B665C;
+  --ink-3: #A39D91;
+  --ink-rgb: 29, 27, 22;
+  --line: rgba(29, 27, 22, .10);
+  --line-2: rgba(29, 27, 22, .06);
+  --wash: rgba(29, 27, 22, .035);
+  --white: #FFFFFF;
+
+  /* agent hues: strong, rgb triplet, soft fill, glow, deep (legible text on paper) */
+  --sun: #F5A524;   --sun-rgb: 245, 165, 36;   --sun-deep: #B06A00;
+  --coral: #FF6B4A; --coral-rgb: 255, 107, 74; --coral-deep: #CF4527;
+  --mint: #1FB58F;  --mint-rgb: 31, 181, 143;  --mint-deep: #0E8466;
+  --sky: #3B9BFF;   --sky-rgb: 59, 155, 255;   --sky-deep: #1C6BC4;
+  --lilac: #8E7CFF; --lilac-rgb: 142, 124, 255; --lilac-deep: #5B48D0;
+  --rose: #F0609A;  --rose-rgb: 240, 96, 154;  --rose-deep: #BF386F;
+
+  --sun-soft: rgba(var(--sun-rgb), .14);     --sun-glow: rgba(var(--sun-rgb), .42);
+  --coral-soft: rgba(var(--coral-rgb), .13); --coral-glow: rgba(var(--coral-rgb), .40);
+  --mint-soft: rgba(var(--mint-rgb), .13);   --mint-glow: rgba(var(--mint-rgb), .40);
+  --sky-soft: rgba(var(--sky-rgb), .12);     --sky-glow: rgba(var(--sky-rgb), .40);
+  --lilac-soft: rgba(var(--lilac-rgb), .13); --lilac-glow: rgba(var(--lilac-rgb), .40);
+  --rose-soft: rgba(var(--rose-rgb), .13);   --rose-glow: rgba(var(--rose-rgb), .40);
+
+  /* brand */
+  --brand: linear-gradient(135deg, var(--sun) 0%, var(--coral) 100%);
+  --brand-soft: linear-gradient(135deg, rgba(var(--sun-rgb), .16), rgba(var(--coral-rgb), .14));
+
+  /* status */
+  --st-running: var(--mint);
+  --st-needs: var(--sun);
+  --st-failed: var(--coral);
+  --st-done: var(--ink);
+  --st-queued: var(--ink-3);
+
+  /* background washes */
+  --wash-peach: rgba(255, 196, 160, .55);
+  --wash-sky: rgba(var(--sky-rgb), .16);
+  --wash-mint: rgba(var(--mint-rgb), .12);
+  --dot-grid: rgba(29, 27, 22, .055);
+
+  /* type */
+  --f-display: "Instrument Serif", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --f-ui: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "Geist Mono", "Cascadia Mono", "SF Mono", ui-monospace, Consolas, "Liberation Mono", monospace;
+
+  /* shape */
+  --r-card: 14px;
+  --r-sm: 9px;
+  --r-pill: 999px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 12px 40px -18px rgba(120, 90, 40, .25);
+  --shadow-sm: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 6px 18px -10px rgba(120, 90, 40, .22);
+  --shadow-lg: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 30px 80px -30px rgba(120, 90, 40, .35), 0 2px 8px -4px rgba(120, 90, 40, .12);
+  --blur: blur(14px) saturate(1.15);
+
+  /* motion */
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --t-fast: 180ms;
+  --t: 220ms;
+  --t-slow: 260ms;
+
+  /* layout */
+  --topbar-h: 56px;
+  --roster-w: 260px;
+  --stream-w: 420px;
+  --timeline-h: 120px;
+}
