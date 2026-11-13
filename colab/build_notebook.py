@@ -69,6 +69,24 @@ TOKEN = globals().get("TOKEN") or secrets.token_urlsafe(18)            # same to
 subprocess.run("pkill -f '[p]ython.* -m sabha' || true", shell=True)   # stop an older hub (and the models it launched)
 time.sleep(5)
 env = dict(os.environ, PATH="/usr/local/bin:" + os.environ["PATH"], SABHA_TOKEN=TOKEN)   # Node 24, dsh and vllm live there
+
+def secret(name):
+    try:
+        from google.colab import userdata
+        return userdata.get(name) or ""
+    except Exception:
+        try:
+            from kaggle_secrets import UserSecretsClient
+            return UserSecretsClient().get_secret(name) or ""
+        except Exception:
+            return ""
+
+# Optional: a search key makes web search reliable. Without one the agents fall back to free engines,
+# which often refuse cloud machines. Add a secret named TAVILY_API_KEY (or BRAVE_API_KEY / SERPER_API_KEY).
+for name in ("TAVILY_API_KEY", "BRAVE_API_KEY", "SERPER_API_KEY"):
+    if secret(name):
+        env[name] = secret(name)
+        print("web search:", name.split("_")[0].lower())
 hub = subprocess.Popen(
     [sys.executable, "-m", "sabha", "--host", "127.0.0.1", "--port", "8787",
      "--tunnel", "cloudflared", "--data", f"{BASE}/sabha_data"],

@@ -100,6 +100,12 @@ Every agent run gets three commands on its PATH that need no key: `websearch "qu
 with `--find WORD` to jump to a term). Search tries DuckDuckGo, then Bing, then Wikipedia.
 You can run them yourself: `python -m sabha.webtools search "joint embedding predictive architecture"`.
 
+Free search is weak from cloud machines: measured from a Kaggle box, DuckDuckGo starts sending a captcha
+after a few searches, Brave and Mojeek refuse, and Bing often answers with unrelated pages. arXiv search
+and page reading stay solid. For reliable web search give the hub one key in its environment:
+`TAVILY_API_KEY`, `BRAVE_API_KEY` or `SERPER_API_KEY`. That service is then asked first and the free
+engines are the fallback. The launch notebook reads the key from a Colab or Kaggle secret of the same name.
+
 ## Status
 
 Early. Work mode is a base that will grow. Custom non-chat models (JEPA-style world

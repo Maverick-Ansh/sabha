@@ -45,9 +45,9 @@ class WebError(Exception):
 
 
 def fetch(url: str, timeout: float = 25, max_bytes: int = 12_000_000,
-          data: bytes | None = None) -> tuple[bytes, str, str]:
+          data: bytes | None = None, headers: dict | None = None) -> tuple[bytes, str, str]:
     """GET (or POST) a URL. Returns (body, content type, final url)."""
-    req = urllib.request.Request(url, data=data, headers={"User-Agent": UA, "Accept-Language": "en"})
+    req = urllib.request.Request(url, data=data, headers={"User-Agent": UA, "Accept-Language": "en", **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read(max_bytes), r.headers.get("Content-Type", ""), r.geturl()
@@ -291,6 +291,44 @@ def _wikipedia(query: str, n: int) -> list[dict]:
             for h in hits][:n]
 
 
+# Search with a key. Free engines refuse or mislead cloud IPs (see README), so when one of these
+# environment variables is set, that service is asked first and the free engines are the fallback.
+
+
+def _tavily(query: str, n: int, key: str) -> list[dict]:
+    raw, _, _ = fetch("https://api.tavily.com/search", timeout=30,
+                      data=json.dumps({"query": query, "max_results": n, "search_depth": "basic"}).encode(),
+                      headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    return [{"title": r.get("title") or "", "url": r.get("url") or "", "snippet": _strip(r.get("content") or "")}
+            for r in json.loads(raw).get("results", []) if r.get("url")]
+
+
+def _brave(query: str, n: int, key: str) -> list[dict]:
+    raw, _, _ = fetch("https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode({"q": query, "count": n}),
+                      headers={"X-Subscription-Token": key, "Accept": "application/json"})
+    return [{"title": _strip(r.get("title") or ""), "url": r.get("url") or "", "snippet": _strip(r.get("description") or "")}
+            for r in (json.loads(raw).get("web") or {}).get("results", []) if r.get("url")]
+
+
+def _serper(query: str, n: int, key: str) -> list[dict]:
+    raw, _, _ = fetch("https://google.serper.dev/search", data=json.dumps({"q": query, "num": n}).encode(),
+                      headers={"X-API-KEY": key, "Content-Type": "application/json"})
+    return [{"title": r.get("title") or "", "url": r.get("link") or "", "snippet": r.get("snippet") or ""}
+            for r in json.loads(raw).get("organic", []) if r.get("link")]
+
+
+KEYED = (("tavily", "TAVILY_API_KEY", _tavily), ("brave", "BRAVE_API_KEY", _brave), ("serper", "SERPER_API_KEY", _serper))
+
+
+def keyed_engine() -> tuple[str, str, object] | None:
+    """(name, key, function) of the first search service whose key is in the environment, or None."""
+    for name, var, fn in KEYED:
+        key = os.environ.get(var, "").strip()
+        if key:
+            return name, key, fn
+    return None
+
+
 _STOP = frozenset("""a an the of in on at to for with by from and or not no nor but if so as than then into about
 between vs versus over under is are was were be been being do does did has have had can could should would will
 shall may might must how what why when where which who whom whose it its this that these those their there here
@@ -330,6 +368,16 @@ def search(query: str, n: int = 6, strict: bool = False, wiki: bool = True) -> t
     """
     errors = []
     words = keywords(query, 12) if strict else []
+    keyed = keyed_engine()
+    if keyed:  # a paid index answers the query itself, so its results are not filtered
+        name, key, fn = keyed
+        try:
+            hits = fn(query, n, key)[:n]
+            if hits:
+                return hits, name
+            errors.append(f"{name}: no results")
+        except (WebError, ValueError, KeyError, TypeError, AttributeError) as e:
+            errors.append(f"{name}: {e}")
     engines = (("duckduckgo", _ddg), ("bing", _bing), ("wikipedia", _wikipedia))
     for name, fn in engines if wiki else engines[:2]:
         try:
