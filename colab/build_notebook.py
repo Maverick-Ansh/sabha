@@ -17,7 +17,7 @@ def code(text):
 md("""
 # Sabha on Colab / Kaggle
 
-Run the cells top to bottom. Cell 3 prints **one link**. Open it on your laptop or phone.
+Run the cells top to bottom. Cell 3 prints **one link**. Open it on your laptop or phone. Cell 5 convenes a council on a paper.
 
 - Works on Colab and on Kaggle (turn **Internet on** in Kaggle's notebook settings).
 - The link carries a secret token. Anyone with the link can run commands on this box, so do not share it.
@@ -124,9 +124,15 @@ COMMON = ("--max-model-len 24576 --max-num-seqs 8 --gpu-memory-utilization 0.92 
 #        name                  Hugging Face id                 served    port  GPU
 SPECS = [("Qwen3.5-4B",         "Qwen/Qwen3.5-4B",              "qwen4b", 8000, "0"),
          ("Qwen3.5-9B (4-bit)", "cyankiwi/Qwen3.5-9B-AWQ-4bit", "qwen9b", 8001, "1")]
-#        name     role                           served    hue
-CREW = [("Lead",  "plans, builds and reports",   "qwen9b", "sun"),
-        ("Scout", "quick checks and small jobs", "qwen4b", "mint")]
+#        name       role                                             served    hue     persona
+CREW = [("Lead",    "chairs the council and keeps it on the question", "qwen9b", "sky",
+         "You weigh what the others say and look for the one thing that decides the question."),
+        ("Scout",   "reads fast and reports what is there",            "qwen4b", "mint",
+         "You report exactly what the text says, with numbers, and nothing more."),
+        ("Critic",  "doubts every claim until it sees the evidence",   "qwen9b", "rose",
+         "You are a sceptical reviewer. You look for missing controls, weak baselines and claims bigger than the evidence."),
+        ("Builder", "asks how you would reproduce it",                 "qwen4b", "sun",
+         "You are an engineer who would have to reproduce this work. You care about what is specified well enough to build.")]
 
 state = api("GET", "/api/state")
 have = {m["name"]: m for m in state["models"]}
@@ -146,12 +152,47 @@ for name, hf, served, port, gpu in SPECS:
 
 by_served = {m["served_name"]: m["id"] for m in have.values()}
 agents = {a["name"]: a for a in state["agents"]}
-for name, role, served, hue in CREW:
+for name, role, served, hue, persona in CREW:
     if name not in agents:
         agents[name] = api("POST", "/api/agents", {"name": name, "role": role, "model_id": by_served[served],
-            "harness": "dsh", "hue": hue,
-            "persona": "You are a careful engineer. Work in the current directory. Check your work by running it. End with a short report."})
+            "harness": "dsh", "hue": hue, "persona": persona})
 print("crew:", list(agents))
+""")
+
+md("""
+## A council on a paper
+
+Open the **Council** tab, paste an arXiv id and press **Convene**. Or run the cell below, which does the
+same thing through the API. The hub fetches the paper, cuts it at its section headings and gives each
+member one part. They write briefs at the same time, discuss for two rounds (a member can end a turn
+with `LOOKUP: <query>` and the hub searches the web for everyone), and the chair writes the verdict.
+Four members on two T4s take about five minutes for a ten page paper.
+
+Agents on missions (Work tab) also have the web: `websearch`, `papers` and `webread` are on their PATH.
+They need no API key.
+""")
+
+code("""
+# 5. Convene a council (wait until both models show "ready" in the status cell)
+PAPER = "2412.06769"          # an arXiv id, or any link to a paper page or PDF
+QUESTION = "Do the continuous thoughts really carry the reasoning, or could the gain come from something else?"
+
+state = api("GET", "/api/state")
+members = [a["id"] for a in state["agents"]][:4]
+council = api("POST", "/api/councils", {"source": PAPER, "question": QUESTION, "agent_ids": members,
+                                        "rounds": 2, "lookups": True})
+print(council.get("id"), council.get("status", council))
+""")
+
+code("""
+# Council status (run any time). Prints the verdict when it is done.
+c = api("GET", f"/api/councils/{council['id']}")
+print(c["status"], "| round", c["round"], "of", c["rounds"], "|", c["note"] or c["error"])
+for m in c["messages"]:
+    who = next((a["name"] for a in state["agents"] if a["id"] == m["agent_id"]), "-")
+    print(f"  {m['kind']:8} r{m['round']} {who:8} {m['content'][:90]!r}")
+if c["verdict"]:
+    print("\\n" + c["verdict"])
 """)
 
 code("""

@@ -322,6 +322,61 @@ async def main() -> int:
             check(f"demo mission {mid} done", ev is not None and ev["data"]["mission"]["status"] == "done",
                   ev and ev["data"]["mission"].get("error"))
 
+        # ---------------- council: mock members read a pasted paper, discuss, give a verdict
+        from sabha import webtools
+        from sabha.council import assign
+        check("council assign() balances consecutive sections", assign([10, 10, 10, 10], 2) == [[0, 1], [2, 3]]
+              and sorted(sum(assign([5], 3), [])) == [0] and assign([30, 1, 1], 2) == [[0], [1, 2]])
+        title, text = webtools.html_to_text(
+            "<html><head><title>T</title></head><body><nav>menu</nav><h2>1 Intro</h2><p>Hello <math alttext='x^2'>"
+            "<mi>x</mi></math> there.</p><section class='ltx_bibliography'><h2>References</h2><p>[1] X</p></section></body></html>")
+        check("webtools html_to_text: headings, math as LaTeX, nav and references dropped",
+              title == "T" and "## 1 Intro" in text and "$x^2$" in text and "menu" not in text and "References" not in text, text)
+        paper_text = "A Tiny Paper\n\nAbstract\nWe test a thing and it works well in 3 settings.\n\n" + "\n\n".join(
+            f"{i} {name}\n" + " ".join(f"In step {k} of {name.lower()} the method reached {60 + k} percent accuracy on the held out split."
+                                       for k in range(1, 9))
+            for i, name in enumerate(["Introduction", "Method", "Experiments", "Conclusion"], 1))
+        two = [agents["Lead"]["id"], agents["Critic"]["id"]]
+        st, body = await api.call("POST", "/api/councils", {"text": paper_text, "agent_ids": two[:1]})
+        check("POST /api/councils needs 2 agents -> 400", st == 400, f"{st} {body}")
+        mark = len(watch.events)
+        st, c = await api.call("POST", "/api/councils", {"text": paper_text, "agent_ids": two, "rounds": 1,
+                                                         "lookups": False, "question": "Does it work?"})
+        check("POST /api/councils", st == 200 and c["id"].startswith("c_") and c["status"] == "fetching", str(c)[:200])
+        cid = c["id"]
+
+        def council_is(*statuses):
+            return lambda e: (e.get("type") == "council.updated" and e["data"]["council"]["id"] == cid
+                              and e["data"]["council"]["status"] in statuses)
+
+        ev = await watch.wait_for(council_is("done", "failed"), 60, start=mark)
+        check("council runs to done", ev is not None and ev["data"]["council"]["status"] == "done",
+              ev and ev["data"]["council"].get("error"))
+        check("council.updated carries no messages", ev is not None and "messages" not in ev["data"]["council"])
+        st, c = await api.call("GET", f"/api/councils/{cid}")
+        kinds = [m["kind"] for m in c["messages"]]
+        check("council messages: 2 briefs, 2 turns, 1 verdict", st == 200 and kinds.count("brief") == 2
+              and kinds.count("say") == 2 and kinds[-1] == "verdict" and c["verdict"], str(kinds))
+        check("council paper cut into sections, every seat has a part", len(c["paper"]["sections"]) == 4
+              and all(seat["section_ids"] for seat in c["seats"]) and c["paper"]["abstract"].startswith("We test"),
+              str(c["paper"])[:300])
+        deltas = [e for e in watch.events[mark:] if e["type"] == "council.delta" and e["data"]["council_id"] == cid]
+        check("council.delta stream is ephemeral and names the agent", len(deltas) > 10
+              and all(e["seq"] == 0 and e["agent_id"] in two for e in deltas))
+        st, sec = await api.call("GET", f"/api/councils/{cid}/section?id=s2")
+        check("GET council section", st == 200 and sec["title"] == "2 Method" and "percent accuracy" in sec["text"], str(sec)[:200])
+        mark = len(watch.events)
+        st, _ = await api.call("POST", f"/api/councils/{cid}/say", {"text": "What about seeds?"})
+        await watch.wait_for(council_is("discussing"), 10, start=mark)
+        ev = await watch.wait_for(council_is("done", "failed"), 60, start=mark)
+        st, c = await api.call("GET", f"/api/councils/{cid}")
+        kinds = [m["kind"] for m in c["messages"]]
+        check("human message after the verdict starts one more round", ev is not None and c["round"] == 2
+              and kinds.count("verdict") == 2 and "human" in kinds, str(kinds))
+        st, _ = await api.call("DELETE", f"/api/councils/{cid}")
+        st2, _ = await api.call("GET", f"/api/councils/{cid}")
+        check("DELETE council", st == 200 and st2 == 404)
+
         # ---------------- create a mock mission and watch it to done
         st, m = await api.call("POST", "/api/missions", {
             "prompt": "Build a tiny tokenizer from scratch and benchmark it", "agent_id": agents["Builder"]["id"]})

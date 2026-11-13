@@ -55,8 +55,9 @@ SAY_TASK = (
     "Do not repeat what was already said.{last}{lookup}"
 )
 LOOKUP_HINT = (
-    " If one fact from outside the paper would settle a point, end with a single line "
-    "'LOOKUP: <web search query>' and the hub will search the web for the council."
+    " Only if one fact from outside the paper would settle a point, end with a single line "
+    "'LOOKUP: <3 to 7 search keywords>' (keywords, not a question) and the hub will search the web "
+    "for the council. One lookup per round, so most turns should not ask for one."
 )
 VERDICT_TASK = (
     "You chair this council. Write its verdict in markdown, under 380 words, with these headings:\n"
@@ -439,9 +440,10 @@ class CouncilManager:
     async def _round(self, c: dict) -> None:
         seats = c["seats"]
         start = (c["round"] - 1) % len(seats)
+        looked = False  # one lookup per round: the first member to ask gets it
         for seat in seats[start:] + seats[:start]:
             _, model = self._model_of(seat["agent_id"])
-            can_look = c["lookups"] and c["lookups_used"] < MAX_LOOKUPS
+            can_look = c["lookups"] and not looked and c["lookups_used"] < MAX_LOOKUPS
             task = SAY_TASK.format(
                 round=c["round"], rounds=max(c["rounds"], c["round"]),
                 last=" This is the last round: say what you now believe about the paper." if c["round"] >= c["rounds"] else "",
@@ -450,14 +452,21 @@ class CouncilManager:
             prompt = self._header(c, seat, model) + self._table(c, seat["agent_id"], budget) + "\n\n" + task
             msg = await self._speak(c, seat, "say", prompt, 450)
             if msg and msg["meta"].get("lookup") and can_look:
+                looked = True
                 await self._lookup(c, seat["agent_id"], msg["meta"]["lookup"])
 
     async def _lookup(self, c: dict, agent_id: str, query: str) -> None:
         c["lookups_used"] += 1
         self._set(c, c["status"], f"searching the web: {query}")
         try:
-            hits, engine = await asyncio.wait_for(asyncio.to_thread(webtools.search, query, 4), 45)
-            body = "\n".join(f"- [{h['title']}]({h['url']}): {h['snippet'][:260]}" for h in hits)
+            hits, engine, query = await asyncio.wait_for(asyncio.to_thread(webtools.lookup, query, 7), 60)
+            # the paper on the table is not news to the council: drop it from its own lookups
+            own = webtools.ARXIV_ID.search(c["paper"].get("url") or "")
+            title = re.sub(r"\W+", " ", c["paper"]["title"]).lower().strip()
+            hits = [h for h in hits if not (own and own.group(1) in h["url"])
+                    and title not in re.sub(r"\W+", " ", h["title"]).lower()][:4]
+            body = ("\n".join(f"- [{h['title']}]({h['url']}): {h['snippet'][:260]}" for h in hits)
+                    or "Nothing relevant came back for these keywords.")
         except (webtools.WebError, asyncio.TimeoutError) as e:
             engine, hits, body = "", [], f"The search did not work: {e or 'timed out'}"
         self._append(c, role="system", kind="lookup", agent_id=agent_id, content=body,

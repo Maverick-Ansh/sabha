@@ -92,6 +92,34 @@ done|failed|stopped ──(resume / undelivered note)──> running
 Snapshots (`/api/state`, `hello`) carry threads **without** `messages`; fetch them per thread.
 A message with `mission_id` set is a mission card (dispatch notice or final report).
 
+### Council
+Several agents read one research paper in parts, then discuss it (`sabha/council.py`).
+```json
+{ "id": "c_...", "title": "paper title", "source": "2412.06769", "question": "what the human wants to know",
+  "status": "discussing",               // fetching | reading | discussing | verdict | done | failed | stopped
+  "note": "",                           // what it is waiting on, e.g. "searching the web: ..."
+  "rounds": 2, "round": 1, "lookups": true, "lookups_used": 0, "chair_id": "a_...",
+  "paper": { "title": "", "authors": [], "url": "", "abstract": "", "chars": 0,
+             "sections": [ { "id": "s1", "title": "1 Introduction", "chars": 4604, "seat": 0 } ] },
+  "seats": [ { "agent_id": "a_...", "section_ids": ["s1", "s2"], "part": "1 Introduction to 2 Related Work",
+               "chars": 9138, "cut": false, "state": "idle" } ],   // state: idle | reading | speaking
+  "messages": [ { "id": "cm_...", "role": "agent", "kind": "brief", "agent_id": "a_...", "round": 0,
+                  "content": "", "thinking": "", "ts": 0, "meta": {} } ],
+  "verdict": "", "error": "", "created_ts": 0, "ended_ts": null }
+```
+Message `kind`: `brief` (a seat's summary of its part), `say` (a discussion turn), `lookup` (web
+results the hub fetched because a turn ended with `LOOKUP: <query>`; `meta` has `query`, `engine`,
+`results`), `verdict` (written by the chair), `human`, `note` (hub notice). `role` is `agent`,
+`human` or `system`. Snapshots carry councils **without** `messages`; fetch them per council.
+The paper text itself stays on disk (`<data>/councils/<id>/paper.json`), never in an event.
+
+Flow: fetch the paper and cut it at its section headings; give consecutive sections to the seats so
+each carries about the same number of characters (`cut: true` when a part had to be trimmed to fit
+the model's context); every seat writes a brief at the same time; then the seats speak in turn for
+`rounds` rounds, each seeing its own part, the other briefs and the talk so far; then the chair
+writes the verdict. Every turn is one plain chat completion, so the hub still has no agent loop.
+A human message after the verdict starts one more round and a new verdict.
+
 ## 3. REST
 
 JSON in, JSON out. Errors: `{ "error": "message" }` with a 4xx/5xx status.
@@ -100,7 +128,7 @@ REST response as an ack and the event as the source of truth.
 
 | Method + path | Body | Returns |
 |---|---|---|
-| `GET /api/state` | | `{ app, system, models, agents, missions, threads, seq_head }` |
+| `GET /api/state` | | `{ app, system, models, agents, missions, threads, councils, seq_head }` |
 | `POST /api/models` | Model fields (no id/status) | Model |
 | `PATCH /api/models/{id}` | partial | Model |
 | `DELETE /api/models/{id}` | | `{ok:true}` |
@@ -124,6 +152,12 @@ REST response as an ack and the event as the source of truth.
 | `POST /api/threads/{id}/messages` | `{ content }` | `{ user: Message, assistant_id: "msg_..." }` |
 | `POST /api/threads/{id}/stop` | | `{ok:true}` |
 | `DELETE /api/threads/{id}` | | `{ok:true}` |
+| `POST /api/councils` | `{ source?, text?, question?, agent_ids, rounds?, lookups?, chair_id? }` | Council. `source` is an arXiv id or any page or PDF link; `text` is pasted paper text. 2 to 6 agents, 1 to 4 rounds. |
+| `GET /api/councils/{id}` | | Council with messages |
+| `POST /api/councils/{id}/say` | `{ text, reply? }` | Council. The human speaks. On a finished council this starts one more round unless `reply` is false. |
+| `POST /api/councils/{id}/stop` | | Council |
+| `DELETE /api/councils/{id}` | | `{ok:true}` |
+| `GET /api/councils/{id}/section?id=s1` | | `{ id, title, text }` one section of the paper |
 | `GET /api/events?since=0&limit=2000` | | `{ events, more }` (all persisted events) |
 
 `app`: `{ name: "Sabha", version, demo: bool }`.
@@ -179,6 +213,9 @@ Persisted events get an increasing `seq` and one line in `events.jsonl`.
 | `thread.updated` | `{ thread }` without messages |
 | `thread.removed` | `{ id }` |
 | `thread.message` | `{ message }` a complete message was appended (user, final assistant, or mission card) |
+| `council.updated` | `{ council }` without messages, on every status / seat / round change |
+| `council.removed` | `{ id }` |
+| `council.message` | `{ council_id, message }` a complete council message was appended |
 
 Stats-only `mission.updated` is throttled to at most one per second per mission.
 
@@ -215,6 +252,7 @@ Unknown dsh event types are forwarded as `run.raw` with `{ raw }`.
 | `chat.delta` | `{ message_id, text?, thinking? }` streamed piece of an assistant reply; carries `thread_id` |
 | `chat.done` | `{ message_id }` (the full message follows as a persisted `thread.message`) |
 | `model.log` | `{ model_id, line }` launch log line |
+| `council.delta` | `{ council_id, message_id, mkind, round, text?, thinking? }` streamed piece of a council turn; carries `agent_id`. The first one for a turn has no text and means the turn began. |
 
 ## 6. Harness adapters
 
@@ -248,6 +286,12 @@ env  = DSH_HOME=<data>/dsh_home/<agent_id>   DSH_PERMISSION_MODE=danger-full-acc
     provider: sabha
     model: <model.served_name>
 ```
+Web access. dsh's own `web_search` needs a paid key, so the hub writes three key-free commands
+into `<data>/bin` and puts that folder first on the run's `PATH`: `websearch "query"`,
+`papers "query" [--new]` (arXiv) and `webread URL [--offset N] [--find WORD]`. They are thin
+wrappers around `python -m sabha.webtools` (standard library only; search tries DuckDuckGo, then
+Bing, then Wikipedia). A short note describing them is prepended to the first task text.
+
 `DSH_HOME` is per agent, not per run, because `--session-id` only resumes a session stored
 in the same home and the same cwd. The agent's `persona` is prepended to the first task
 text. stdout is NDJSON (one event per line, lines up to 32 KiB, `final` unbounded), stderr

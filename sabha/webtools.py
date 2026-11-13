@@ -88,7 +88,7 @@ class _Text(HTMLParser):
         cls = a.get("class") or ""
         if tag == "math":
             if a.get("alttext"):
-                self.out.append(f" ${a['alttext']}$ ")
+                self.out.append(f" ${html.unescape(a['alttext'])}$ ")
             self._skip_tag, self._depth = tag, 1
             return
         if tag in self.SKIP or not self.SKIP_CLASS.isdisjoint(cls.split()):
@@ -236,7 +236,7 @@ def _page_text(url: str) -> tuple[str, str]:
 
 
 def _strip(s: str) -> str:
-    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", s))).strip()
+    return re.sub(r"\s+", " ", html.unescape(html.unescape(re.sub(r"<[^>]+>", "", s)))).strip()
 
 
 def _ddg(query: str, n: int) -> list[dict]:
@@ -291,18 +291,79 @@ def _wikipedia(query: str, n: int) -> list[dict]:
             for h in hits][:n]
 
 
-def search(query: str, n: int = 6) -> tuple[list[dict], str]:
-    """Web search without a key. Returns (results, engine name). Results: title, url, snippet."""
+_STOP = frozenset("""a an the of in on at to for with by from and or not no nor but if so as than then into about
+between vs versus over under is are was were be been being do does did has have had can could should would will
+shall may might must how what why when where which who whom whose it its this that these those their there here
+really truly actually just only also paper papers arxiv please find search""".split())
+
+
+def keywords(query: str, limit: int = 8) -> list[str]:
+    """The content words of a query, in order. Models tend to write a whole question; engines want keywords."""
+    out: list[str] = []
+    for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9.+_-]*", query):
+        w = w.strip(".-_").lower()
+        if len(w) > 1 and w not in _STOP and w not in out:
+            out.append(w)
+    return out[:limit]
+
+
+def relevant(hits: list[dict], words: list[str]) -> list[dict]:
+    """Keep results that mention at least two of the query's keywords (one, for a one-word query)."""
+    need = min(2, len(words))
+    keep = []
+    for h in hits:
+        text = (h.get("title", "") + " " + h.get("snippet", "") + " " + h.get("url", "")).lower()
+        if sum(w in text for w in words) >= need:
+            keep.append(h)
+    return keep
+
+
+def search(query: str, n: int = 6, strict: bool = False) -> tuple[list[dict], str]:
+    """Web search without a key. Returns (results, engine name). Results: title, url, snippet.
+
+    With strict=True a result must mention the query's keywords, so an engine that
+    answers with unrelated pages is skipped and the next one is tried.
+    """
     errors = []
+    words = keywords(query, 12) if strict else []
     for name, fn in (("duckduckgo", _ddg), ("bing", _bing), ("wikipedia", _wikipedia)):
         try:
-            hits = fn(query, n)
+            hits = fn(query, n + 4 if strict else n)
+            if strict:
+                hits = relevant(hits, words)[:n]
             if hits:
                 return hits, name
-            errors.append(f"{name}: no results")
+            errors.append(f"{name}: nothing relevant")
         except (WebError, ValueError, KeyError) as e:
             errors.append(f"{name}: {e}")
     raise WebError("search failed. " + "; ".join(errors))
+
+
+def lookup(query: str, n: int = 4) -> tuple[list[dict], str, str]:
+    """A search for the council: keywords only, relevant results only, arXiv when the web has nothing.
+
+    Returns (results, engine, the query that was really sent).
+    """
+    words = keywords(query)
+    q = " ".join(words) or query.strip()
+    hits: list[dict] = []
+    engine = ""
+    try:
+        hits, engine = search(q, n, strict=True)
+    except WebError:
+        pass
+    if len(hits) < 2:
+        for k in (4, 2):
+            try:
+                found = papers(" ".join(words[:k]), n) if words else []
+            except WebError:
+                break
+            if found:
+                hits = (hits + [{"title": f"{p['title']} ({p['date'][:4]})", "url": p["url"],
+                                 "snippet": p["abstract"][:300]} for p in found])[:n]
+                engine = f"{engine}+arxiv" if engine else "arxiv"
+                break
+    return hits, engine, q
 
 
 def _entry(e) -> dict:
@@ -498,7 +559,12 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     try:
         if args.cmd == "search":
-            hits, engine = search(" ".join(args.query), max(1, min(args.n, 10)))
+            query, n = " ".join(args.query), max(1, min(args.n, 10))
+            try:
+                hits, engine = search(query, n, strict=True)
+            except WebError:
+                hits, engine = search(query, n)
+                engine += ", loose match"
             print(f"{len(hits)} results ({engine})")
             for i, h in enumerate(hits, 1):
                 print(f"\n{i}. {h['title']}\n   {h['url']}\n   {h['snippet'][:300]}")

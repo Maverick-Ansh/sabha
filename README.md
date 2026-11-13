@@ -18,7 +18,7 @@ your laptop / phone                     Colab or Kaggle box
                                          └─────────────────────────────────────┘
 ```
 
-## Three modes
+## Four modes
 
 - **Watch.** A live orbit of your agents, a full transcript of every thought, tool call
   and result, and a timeline of the whole 12-hour session you can scrub back through.
@@ -27,6 +27,10 @@ your laptop / phone                     Colab or Kaggle box
   becomes a task. The agent plans, works, and the report lands back in the chat.
 - **Work.** A mission board. Approve or edit a plan before it runs, whisper a note to
   a running agent, stop, resume, and read the files it produced.
+- **Council.** Give it an arXiv id. The hub cuts the paper at its section headings and
+  gives each agent one part. They write briefs at the same time, discuss for a few rounds,
+  look things up on the web when a point needs it, and the chair writes a verdict. You can
+  speak at any time. A message after the verdict starts one more round.
 
 ## Try it on your laptop (no GPU, 20 seconds)
 
@@ -66,6 +70,8 @@ Do not share the link.
 |---|---|
 | `sabha/` | The hub. One aiohttp process: REST, WebSocket, model launcher, harness runs. |
 | `sabha/harness/` | Adapters. `dsh` (real agents), `mock` (demo), `chat` (no tools). |
+| `sabha/council.py` | Council sessions: split a paper, briefs, rounds, verdict. |
+| `sabha/webtools.py` | Key-free web access: `websearch`, `papers` (arXiv), `webread`. Standard library only. |
 | `web/` | The UI. Plain ES modules and CSS, no build step. |
 | `docs/PROTOCOL.md` | The contract between hub and UI. Read this to add a model kind or a harness. |
 | `colab/sabha_colab.ipynb` | Launch notebook. |
@@ -88,9 +94,11 @@ Tested on Kaggle's 2x Tesla T4: Qwen3.5-4B on one card and Qwen3.5-9B (4-bit AWQ
 vLLM 0.33, dsh 0.2.1-rc.5. `scripts/box_setup.sh` installs Node 24, dsh and vLLM on the box.
 On a 15 GB card keep `--max-num-seqs 8`. The first start of a model takes about 10 minutes.
 
-Web search. dsh's `web_search` tool needs a search key. Set `DEEPSEEK_API_KEY` in the hub's
-environment to turn it on. Without it, Sabha tells each agent that search is off and points it
-at `web_fetch` and the arXiv API, which need no key.
+Web access. dsh's own `web_search` tool needs a paid search key, so Sabha does not use it.
+Every agent run gets three commands on its PATH that need no key: `websearch "query"`,
+`papers "query"` (arXiv) and `webread URL` (a page or a PDF as text, 6000 characters at a time,
+with `--find WORD` to jump to a term). Search tries DuckDuckGo, then Bing, then Wikipedia.
+You can run them yourself: `python -m sabha.webtools search "joint embedding predictive architecture"`.
 
 ## Status
 
