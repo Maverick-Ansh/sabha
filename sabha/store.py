@@ -177,6 +177,7 @@ class Store:
         self.agents: dict[str, dict] = {}
         self.missions: dict[str, dict] = {}
         self.threads: dict[str, dict] = {}
+        self.councils: dict[str, dict] = {}
         self.seq_head = 0
         self.had_state = False
         self._save_handle: asyncio.TimerHandle | None = None
@@ -191,7 +192,7 @@ class Store:
         if self.state_path.exists():
             try:
                 data = json.loads(self.state_path.read_text("utf-8"))
-                for key in ("models", "agents", "missions", "threads"):
+                for key in ("models", "agents", "missions", "threads", "councils"):
                     table = getattr(self, key)
                     for item in data.get(key) or []:
                         if isinstance(item, dict) and item.get("id"):
@@ -241,6 +242,7 @@ class Store:
             "agents": list(self.agents.values()),
             "missions": list(self.missions.values()),
             "threads": list(self.threads.values()),
+            "councils": list(self.councils.values()),
         }
         text = json.dumps(data, separators=(",", ":"), default=str)
         tmp = self.state_path.with_name("state.json.tmp")

@@ -1,0 +1,65 @@
+/* "Aurora glass" finish. Loaded last. The view sheets hold layout; this sheet holds the look:
+   one sans family with tight display tracking, a frosted top bar, iOS-style segmented controls,
+   a solid blue primary action, and the blue to violet core. */
+body { font-family: var(--f-ui); letter-spacing: -.011em; font-feature-settings: "cv11", "ss03"; }
+::selection { background: rgba(var(--sky-rgb), .22); }
+a { color: var(--sky-deep); }
+
+/* type: no serif italics anywhere; headlines are semibold and tight */
+.display { font-family: var(--f-display); font-weight: 600; letter-spacing: -.03em; }
+.italic, .display.italic, .md h1, .mcard-title { font-style: normal; }
+.micro { font: 600 10.5px/1.2 var(--f-ui); letter-spacing: .07em; }
+.mono, .chip.mono, .input.mono, .textarea.mono { letter-spacing: 0; }
+.md h1, .md h2, .md h3 { font-family: var(--f-display); font-weight: 600; letter-spacing: -.022em; }
+.md h1 { font-size: 1.45em; }
+.md h2 { font-size: 1.22em; }
+.md h3 { font-size: 1.06em; }
+.md blockquote { border-left-color: rgba(var(--sky-rgb), .5); }
+.gate-card h1 { font: 600 34px/1.08 var(--f-display); letter-spacing: -.035em; }
+.wm-text { font: 600 20px/1 var(--f-display); letter-spacing: -.035em; transform: none; }
+.msg.agent.waiting .answer::before { font: 400 15px var(--f-ui); }
+.thought-body { font: 400 14px/1.55 var(--f-ui); }
+.mcard-title { font-weight: 600; font-size: 19px; letter-spacing: -.02em; }
+.stream-scope { font: 600 17px/1.2 var(--f-display); letter-spacing: -.02em; }
+.ev-think { font: 400 13.5px/1.5 var(--f-ui); }
+.col-title { font: 600 17px/1.2 var(--f-display); letter-spacing: -.02em; }
+.modal-title { font-size: 21px; }
+
+/* frosted top bar */
+.topbar { background: rgba(var(--paper-rgb), .72); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); }
+.topbar::after { left: 0; right: 0; background: var(--line); }
+.sun-glyph .sun-ticks { stroke-opacity: .28; }
+.sun-glyph .sun-ring { stroke: rgba(var(--core-a-rgb), .4); }
+.demo-chip { color: var(--sky-deep); background: var(--sky-soft); border-color: rgba(var(--sky-rgb), .3); }
+
+/* segmented control, iOS style */
+.seg { background: rgba(118, 118, 128, .12); border-color: transparent; }
+.seg .seg-hl { background: var(--white); box-shadow: 0 3px 8px rgba(0, 0, 0, .12), 0 3px 1px rgba(0, 0, 0, .04); }
+.seg:not(:has(.seg-hl)) button[aria-pressed="true"] { background: var(--white); box-shadow: 0 2px 6px rgba(0, 0, 0, .12), 0 2px 1px rgba(0, 0, 0, .04); }
+
+/* buttons and fields */
+.btn { font-weight: 500; letter-spacing: -.01em; }
+.btn.brand { background: var(--action); color: var(--white); box-shadow: 0 10px 24px -12px rgba(var(--core-a-rgb), .85), 0 1px 0 rgba(255, 255, 255, .25) inset; }
+.btn.brand:hover { filter: brightness(1.08); }
+.input, .textarea, .select { border-radius: 12px; }
+.input:focus, .textarea:focus, .select:focus { border-color: rgba(var(--sky-rgb), .6); box-shadow: 0 0 0 4px rgba(var(--sky-rgb), .14); }
+.talk-composer:focus-within { box-shadow: 0 0 0 5px rgba(var(--sky-rgb), .1), var(--shadow); }
+.talk-composer.mission { border-color: rgba(var(--sky-rgb), .5); }
+.talk-composer.mission .seg button[aria-pressed="true"] { color: var(--sky-deep); }
+.agent-chip.on { box-shadow: 0 0 0 3px rgba(var(--hue-rgb), .14), var(--shadow-sm); }
+.gpu-mem span { background: var(--brand); }
+
+/* the core orb (gate) and aurora text */
+.gate-sun { background: radial-gradient(circle at 36% 32%, var(--white) 0 6%, var(--core-a) 44%, var(--core-b) 100%);
+  box-shadow: 0 0 0 10px rgba(var(--core-a-rgb), .08), 0 0 70px rgba(var(--core-b-rgb), .5); }
+.greet-2 { background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* report cards pick up the core instead of the old sun */
+.mcard.report { border-color: rgba(var(--core-a-rgb), .35); background: linear-gradient(180deg, rgba(var(--core-a-rgb), .06), var(--card-strong) 140px); }
+.sunburst { background: radial-gradient(circle, rgba(var(--core-a-rgb), .45), rgba(var(--core-b-rgb), .16) 45%, transparent 70%); }
+@keyframes celebrate { 0% { box-shadow: 0 0 0 0 rgba(var(--core-a-rgb), .45), var(--shadow); } 60% { box-shadow: 0 0 0 14px rgba(var(--core-a-rgb), 0), var(--shadow); } 100% { box-shadow: var(--shadow); } }
+
+@media (max-width: 520px) {
+  .mode-switch button { padding: 0 9px; font-size: 12px; }
+  .wm-text { display: none; }
+}

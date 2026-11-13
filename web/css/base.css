@@ -138,7 +138,7 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
   font-size: 12.5px; font-weight: 500; color: var(--ink-2); transition: color var(--t-fast) var(--ease); }
 .seg button[aria-pressed="true"] { color: var(--ink); }
 .seg .seg-hl { position: absolute; z-index: 0; top: 3px; bottom: 3px; border-radius: var(--r-pill); background: var(--white);
-  box-shadow: 0 1px 2px rgba(var(--ink-rgb), .12), 0 4px 14px -6px rgba(120, 90, 40, .3);
+  box-shadow: 0 1px 2px rgba(var(--ink-rgb), .12), 0 4px 14px -6px rgba(0, 0, 0, .3);
   transition: left var(--t) var(--ease), width var(--t) var(--ease); }
 
 /* Cards */

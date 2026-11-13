@@ -4,8 +4,8 @@ import { subscribe, getState, sessionWindow } from './store.js';
 import { fmtDur, serverNow } from './format.js';
 import { isMuted, setMuted } from './notify.js';
 
-export const MODES = ['watch', 'talk', 'work'];
-const LABEL = { watch: 'Watch', talk: 'Talk', work: 'Work' };
+export const MODES = ['watch', 'talk', 'work', 'council'];
+const LABEL = { watch: 'Watch', talk: 'Talk', work: 'Work', council: 'Council' };
 
 function sunGlyph() {
   const ticks = [];
@@ -16,7 +16,7 @@ function sunGlyph() {
   }
   return h('svg', { class: 'sun-glyph', width: 26, height: 26, viewBox: '0 0 24 24', 'aria-hidden': 'true' },
     h('defs', null, h('linearGradient', { id: 'sabhaSunGrad', x1: '0', y1: '0', x2: '1', y2: '1' },
-      h('stop', { offset: '0', style: 'stop-color: var(--sun)' }), h('stop', { offset: '1', style: 'stop-color: var(--coral)' }))),
+      h('stop', { offset: '0', style: 'stop-color: var(--core-a)' }), h('stop', { offset: '1', style: 'stop-color: var(--core-b)' }))),
     h('g', { class: 'sun-ticks' }, ticks),
     h('circle', { cx: 12, cy: 12, r: 6.4, class: 'sun-ring' }),
     h('circle', { cx: 12, cy: 12, r: 4.6, fill: 'url(#sabhaSunGrad)' }));

@@ -1,40 +1,45 @@
-/* Sabha design tokens: "daylight mission control".
+/* Sabha design tokens: "aurora glass".
+   Apple-plain surfaces (cool grey page, white glass cards, near-black ink, hairlines) with one
+   futuristic accent, a blue to violet aurora, kept for the core orb, primary actions and verdicts.
    Every colour in the app comes from here. JS reads the *-rgb triplets for canvas work. */
 :root {
-  /* paper and ink */
-  --paper: #FAF7F2;
-  --paper-2: #F3EEE6;
-  --paper-rgb: 250, 247, 242;
-  --card: rgba(255, 255, 255, .72);
-  --card-solid: #FFFDF9;
-  --card-strong: rgba(255, 255, 255, .9);
-  --ink: #1D1B16;
-  --ink-2: #6B665C;
-  --ink-3: #A39D91;
-  --ink-rgb: 29, 27, 22;
-  --line: rgba(29, 27, 22, .10);
-  --line-2: rgba(29, 27, 22, .06);
-  --wash: rgba(29, 27, 22, .035);
+  /* page and ink */
+  --paper: #F5F5F7;
+  --paper-2: #ECECF0;
+  --paper-rgb: 245, 245, 247;
+  --card: rgba(255, 255, 255, .68);
+  --card-solid: #FFFFFF;
+  --card-strong: rgba(255, 255, 255, .88);
+  --ink: #1D1D1F;
+  --ink-2: #6E6E73;
+  --ink-3: #8E8E93;
+  --ink-rgb: 29, 29, 31;
+  --line: rgba(0, 0, 0, .09);
+  --line-2: rgba(0, 0, 0, .055);
+  --wash: rgba(0, 0, 0, .04);
   --white: #FFFFFF;
 
-  /* agent hues: strong, rgb triplet, soft fill, glow, deep (legible text on paper) */
-  --sun: #F5A524;   --sun-rgb: 245, 165, 36;   --sun-deep: #B06A00;
-  --coral: #FF6B4A; --coral-rgb: 255, 107, 74; --coral-deep: #CF4527;
-  --mint: #1FB58F;  --mint-rgb: 31, 181, 143;  --mint-deep: #0E8466;
-  --sky: #3B9BFF;   --sky-rgb: 59, 155, 255;   --sky-deep: #1C6BC4;
-  --lilac: #8E7CFF; --lilac-rgb: 142, 124, 255; --lilac-deep: #5B48D0;
-  --rose: #F0609A;  --rose-rgb: 240, 96, 154;  --rose-deep: #BF386F;
+  /* agent hues (system colours): strong, rgb triplet, deep (legible as text on the page) */
+  --sun: #FF9F0A;   --sun-rgb: 255, 159, 10;   --sun-deep: #A85600;
+  --coral: #FF453A; --coral-rgb: 255, 69, 58;  --coral-deep: #C4281D;
+  --mint: #30C25B;  --mint-rgb: 48, 194, 91;   --mint-deep: #1B7F3B;
+  --sky: #0A84FF;   --sky-rgb: 10, 132, 255;   --sky-deep: #0062CC;
+  --lilac: #6E6BF2; --lilac-rgb: 110, 107, 242; --lilac-deep: #4543C4;
+  --rose: #FF375F;  --rose-rgb: 255, 55, 95;   --rose-deep: #C81E48;
 
   --sun-soft: rgba(var(--sun-rgb), .14);     --sun-glow: rgba(var(--sun-rgb), .42);
-  --coral-soft: rgba(var(--coral-rgb), .13); --coral-glow: rgba(var(--coral-rgb), .40);
+  --coral-soft: rgba(var(--coral-rgb), .11); --coral-glow: rgba(var(--coral-rgb), .40);
   --mint-soft: rgba(var(--mint-rgb), .13);   --mint-glow: rgba(var(--mint-rgb), .40);
-  --sky-soft: rgba(var(--sky-rgb), .12);     --sky-glow: rgba(var(--sky-rgb), .40);
-  --lilac-soft: rgba(var(--lilac-rgb), .13); --lilac-glow: rgba(var(--lilac-rgb), .40);
-  --rose-soft: rgba(var(--rose-rgb), .13);   --rose-glow: rgba(var(--rose-rgb), .40);
+  --sky-soft: rgba(var(--sky-rgb), .11);     --sky-glow: rgba(var(--sky-rgb), .40);
+  --lilac-soft: rgba(var(--lilac-rgb), .12); --lilac-glow: rgba(var(--lilac-rgb), .40);
+  --rose-soft: rgba(var(--rose-rgb), .11);   --rose-glow: rgba(var(--rose-rgb), .40);
 
-  /* brand */
-  --brand: linear-gradient(135deg, var(--sun) 0%, var(--coral) 100%);
-  --brand-soft: linear-gradient(135deg, rgba(var(--sun-rgb), .16), rgba(var(--coral-rgb), .14));
+  /* the core: orb, primary buttons, verdict frame */
+  --core-a: #0A84FF; --core-a-rgb: 10, 132, 255;
+  --core-b: #BF5AF2; --core-b-rgb: 191, 90, 242;
+  --action: #0071E3;
+  --brand: linear-gradient(135deg, var(--core-a) 0%, #5E5CE6 52%, var(--core-b) 100%);
+  --brand-soft: linear-gradient(135deg, rgba(var(--core-a-rgb), .12), rgba(var(--core-b-rgb), .12));
 
   /* status */
   --st-running: var(--mint);
@@ -43,31 +48,31 @@
   --st-done: var(--ink);
   --st-queued: var(--ink-3);
 
-  /* background washes */
-  --wash-peach: rgba(255, 196, 160, .55);
-  --wash-sky: rgba(var(--sky-rgb), .16);
-  --wash-mint: rgba(var(--mint-rgb), .12);
-  --dot-grid: rgba(29, 27, 22, .055);
+  /* background aurora */
+  --wash-peach: rgba(var(--core-b-rgb), .13);
+  --wash-sky: rgba(var(--core-a-rgb), .14);
+  --wash-mint: rgba(var(--rose-rgb), .05);
+  --dot-grid: transparent;
 
   /* type */
-  --f-display: "Instrument Serif", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-  --f-ui: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  --f-mono: "Geist Mono", "Cascadia Mono", "SF Mono", ui-monospace, Consolas, "Liberation Mono", monospace;
+  --f-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --f-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI Variable Display", "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "SF Mono", ui-monospace, "Geist Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
 
   /* shape */
-  --r-card: 14px;
-  --r-sm: 9px;
+  --r-card: 20px;
+  --r-sm: 12px;
   --r-pill: 999px;
-  --shadow: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 12px 40px -18px rgba(120, 90, 40, .25);
-  --shadow-sm: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 6px 18px -10px rgba(120, 90, 40, .22);
-  --shadow-lg: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 30px 80px -30px rgba(120, 90, 40, .35), 0 2px 8px -4px rgba(120, 90, 40, .12);
-  --blur: blur(14px) saturate(1.15);
+  --shadow: 0 0 0 .5px rgba(0, 0, 0, .05), 0 1px 1px rgba(0, 0, 0, .03), 0 14px 34px -16px rgba(0, 0, 0, .16);
+  --shadow-sm: 0 0 0 .5px rgba(0, 0, 0, .05), 0 5px 14px -8px rgba(0, 0, 0, .16);
+  --shadow-lg: 0 0 0 .5px rgba(0, 0, 0, .06), 0 32px 70px -28px rgba(0, 0, 0, .3), 0 4px 12px -6px rgba(0, 0, 0, .08);
+  --blur: blur(24px) saturate(1.8);
 
   /* motion */
   --ease: cubic-bezier(.2, .8, .2, 1);
   --t-fast: 180ms;
   --t: 220ms;
-  --t-slow: 260ms;
+  --t-slow: 320ms;
 
   /* layout */
   --topbar-h: 56px;

@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from ..util import group_kwargs, kill_tree, read_lines
@@ -32,15 +33,36 @@ DSH_MISSING = ("dsh not found on PATH; it needs Node >= 24.9 and a pinned versio
                "(pre-releases only): npm i -g @deepseek-ai/dsh@0.2.1-rc.5")
 
 
-# dsh's web_search needs a paid search key (DeepSeek, Exa or Perplexity). Without one the
-# tool fails on every call, and small models burn their steps retrying it. Tell them up front.
-NO_SEARCH_NOTE = (
-    "Box note: the web_search tool has no API key on this machine and always fails, so do not "
-    "call it. web_fetch works. To find research papers, fetch the arXiv API, for example "
-    "https://export.arxiv.org/api/query?search_query=all:%22latent+reasoning%22"
-    "&sortBy=submittedDate&sortOrder=descending&max_results=20 "
-    "(change the quoted phrase). It returns titles, abstracts and links, newest first."
+# dsh's own web_search needs a paid search key (DeepSeek, Exa or Perplexity). Without one it
+# fails on every call and small models burn their steps retrying it. So the hub puts three
+# key-free commands on PATH (sabha/webtools.py) and tells the agent about them up front.
+WEB_NOTE = (
+    "Box note: you have internet access through three shell commands. Run them with your shell tool.\n"
+    "  websearch \"query\"                        web search: titles, links, snippets\n"
+    "  papers \"query\" [--new]                   arXiv search: titles, authors, dates, abstracts\n"
+    "  webread URL [--offset N] [--find WORD]   read a page or a PDF as text, 6000 characters at a time\n"
+    "Do not call the built-in web_search tool: it has no API key here and always fails. "
+    "Your context is small, so read one page at a time and write down what you need before the next one."
 )
+TOOLS = {"websearch": "search", "papers": "papers", "webread": "read"}
+
+
+def install_tools(data_dir: Path) -> Path:
+    """Write the websearch / papers / webread wrappers into <data>/bin and return that folder."""
+    bin_dir = Path(data_dir) / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    pkg_root = Path(__file__).resolve().parents[2]
+    for name, sub in TOOLS.items():
+        if os.name == "nt":
+            (bin_dir / f"{name}.cmd").write_text(
+                f'@echo off\nset "PYTHONPATH={pkg_root}"\n"{sys.executable}" -m sabha.webtools {sub} %*\n',
+                encoding="utf-8", newline="\r\n")
+        else:
+            path = bin_dir / name
+            path.write_text(f'#!/bin/sh\nPYTHONPATH="{pkg_root}" exec "{sys.executable}" -m sabha.webtools {sub} "$@"\n',
+                            encoding="utf-8", newline="\n")
+            path.chmod(0o755)
+    return bin_dir
 
 
 def dsh_path() -> str | None:
@@ -164,6 +186,7 @@ class DshHarness(Harness):
 
         env = dict(os.environ)
         key_env = model.get("api_key_env") or ""
+        env["PATH"] = str(install_tools(Path(ctx.data_dir))) + os.pathsep + env.get("PATH", "")
         env.update({
             "DSH_HOME": str(home),
             "DSH_PERMISSION_MODE": "danger-full-access",
@@ -177,8 +200,7 @@ class DshHarness(Harness):
         task = ctx.task
         persona = (ctx.agent.get("persona") or "").strip()
         if not ctx.session_id:
-            if not env.get("DEEPSEEK_API_KEY"):
-                task = f"{NO_SEARCH_NOTE}\n\n{task}"
+            task = f"{WEB_NOTE}\n\n{task}"
             if persona:
                 task = f"{persona}\n\n---\n\n{task}"
 

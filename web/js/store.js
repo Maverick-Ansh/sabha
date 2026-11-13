@@ -4,7 +4,7 @@ import { eventSummary, kindOf, stationFor, serverNow } from './format.js';
 const state = {
   ready: false,
   app: {}, system: {},
-  models: {}, agents: {}, missions: {}, threads: {},
+  models: {}, agents: {}, missions: {}, threads: {}, councils: {},
   seqHead: 0,
   telemetry: null, telemetryAt: 0,
   conn: 'connecting',
@@ -38,6 +38,7 @@ export function reset(snap) {
   state.agents = byId(snap.agents);
   state.missions = byId(snap.missions);
   state.threads = byId(snap.threads);
+  state.councils = byId(snap.councils);
   state.seqHead = Math.max(state.seqHead, snap.seq_head || 0);
   state.ready = true;
   emit('reset', state);
@@ -115,6 +116,7 @@ export function apply(ev, live) {
   if (t === 'chat.delta') return emit('delta', ev);
   if (t === 'chat.done') return emit('chatdone', ev);
   if (t === 'model.log') return emit('modellog', ev);
+  if (t === 'council.delta') return emit('cdelta', ev);
 
   if (t.startsWith('run.') || t.startsWith('plan.') || t.startsWith('human.')) {
     if (noteActivity(ev)) emit('activity', ev);
@@ -146,6 +148,12 @@ export function apply(ev, live) {
     } break;
     case 'thread.removed': delete state.threads[d.id]; emit('threads', { id: d.id, removed: true }); break;
     case 'thread.message': emit('message', ev); break;
+    case 'council.updated': if (d.council) {
+      state.councils[d.council.id] = Object.assign({}, state.councils[d.council.id], d.council);
+      emit('councils', state.councils[d.council.id]);
+    } break;
+    case 'council.removed': delete state.councils[d.id]; emit('councils', { id: d.id, removed: true }); break;
+    case 'council.message': emit('cmessage', ev); break;
     default: break;
   }
 }

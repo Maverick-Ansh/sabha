@@ -8,6 +8,7 @@ import { createTopbar, MODES } from './shell.js';
 import { createWatch } from './watch.js';
 import { createTalk } from './talk.js';
 import { createWork } from './work.js';
+import { createCouncil } from './council.js';
 import { openDrawer } from './drawer.js';
 import { openCrew } from './crew.js';
 import { openPalette } from './palette.js';
@@ -18,7 +19,7 @@ const root = document.getElementById('app');
 let helloHead = 0, helloSeen = false, pongSeen = false, conn = null, gateEl = null, mode = null;
 
 // ---------- views ----------
-const views = { watch: createWatch(), talk: createTalk(), work: createWork() };
+const views = { watch: createWatch(), talk: createTalk(), work: createWork(), council: createCouncil() };
 const topbar = createTopbar({ onMode: (m) => setMode(m), onCrew: () => openCrew(), onPalette: () => openPalette() });
 const viewsEl = h('main.views', null, Object.values(views).map((v) => v.el));
 root.append(topbar.el, viewsEl);
@@ -44,7 +45,7 @@ function setMode(next) {
   inEl.classList.remove('entering'); void inEl.offsetWidth; inEl.classList.add('entering');
   views[mode].setActive(true);
 }
-const modeFromHash = () => { const m = location.hash.match(/^#\/(watch|talk|work)\b/); return m ? m[1] : null; };
+const modeFromHash = () => { const m = location.hash.match(/^#\/(watch|talk|work|council)\b/); return m ? m[1] : null; };
 addEventListener('hashchange', () => { const m = modeFromHash(); if (m) setMode(m); });
 
 nav.go = setMode;
@@ -64,7 +65,7 @@ addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
   if (typing(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
   if (document.querySelector('.modal, .drawer, .slideover')) return;
-  const i = ['1', '2', '3'].indexOf(e.key);
+  const i = ['1', '2', '3', '4'].indexOf(e.key);
   if (i >= 0) { e.preventDefault(); setMode(MODES[i]); }
 });
 

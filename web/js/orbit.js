@@ -6,12 +6,12 @@ import { h, showTip, hideTip } from './dom.js';
 
 const TAU = Math.PI * 2;
 const MONO = '"Geist Mono", "Cascadia Mono", Consolas, monospace';
-const SERIF = '"Instrument Serif", "Iowan Old Style", Georgia, serif';
+const SERIF = '-apple-system, "SF Pro Display", Inter, "Segoe UI", system-ui, sans-serif';
 
 export function createOrbit(canvas, { onFocus } = {}) {
   const ctx = canvas.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
-  const INK = rgbOf('ink'), PAPER = rgbOf('paper'), SUN = rgbOf('sun'), CORAL = rgbOf('coral');
+  const INK = rgbOf('ink'), PAPER = rgbOf('paper'), SUN = rgbOf('core-a'), CORAL = rgbOf('core-b');
   let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0, sunR = 30;
   let active = false, raf = 0, last = 0, clock = 0, sunFlare = -9, layer = null;
   const orbs = new Map();         // agent_id -> orb state
@@ -244,7 +244,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
     ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(cx, cy, sunR * 0.8, 0, TAU); ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,.97)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `italic 400 ${Math.round(sunR * 1.15)}px ${SERIF}`;
+    ctx.font = `600 ${Math.round(sunR * 0.92)}px ${SERIF}`;
     ctx.fillText(String(running), cx, cy + sunR * 0.06);
     ctx.font = `500 9px ${MONO}`; ctx.fillStyle = rgba(INK, 0.45);
     spaced('IN SESSION', cx, cy + sunR + 16);

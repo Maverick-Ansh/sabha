@@ -23,6 +23,7 @@ from aiohttp import WSMsgType, web
 
 from . import __version__
 from .bus import Bus
+from .council import CouncilManager, public as council_public
 from .harness import NAMES as HARNESSES
 from .harness.dsh import dsh_path
 from .missions import MissionManager
@@ -79,6 +80,7 @@ class Hub:
         self.models = ModelManager(self)
         self.talk = TalkManager(self)
         self.missions = MissionManager(self)
+        self.councils = CouncilManager(self)
         self.telemetry = Telemetry(self)
         self.sockets: set[web.WebSocketResponse] = set()
 
@@ -87,6 +89,7 @@ class Hub:
         self.models.recover()
         self.missions.recover()
         self.talk.recover()
+        self.councils.recover()
         if self.cfg.demo and not self.store.had_state:
             from .demo import seed_demo
             await seed_demo(self)
@@ -96,6 +99,7 @@ class Hub:
 
     async def close(self) -> None:
         await self.missions.close()
+        await self.councils.close()
         await self.talk.close()
         await self.models.close()
         await self.telemetry.close()
@@ -117,6 +121,7 @@ class Hub:
             "agents": list(self.store.agents.values()),
             "missions": list(self.store.missions.values()),
             "threads": [thread_public(t) for t in self.store.threads.values()],
+            "councils": [council_public(c) for c in self.store.councils.values()],
             "seq_head": self.store.seq_head,
         }
 
@@ -449,6 +454,35 @@ async def delete_thread(request):
     return web.json_response({"ok": True})
 
 
+# ---------------------------------------------------------------- councils
+
+
+async def create_council(request):
+    return web.json_response(_hub(request).councils.create(await _body(request)))
+
+
+async def get_council(request):
+    return web.json_response(_hub(request).councils.get(request.match_info["id"]))
+
+
+async def say_council(request):
+    return web.json_response(await _hub(request).councils.say(request.match_info["id"], await _body(request)))
+
+
+async def stop_council(request):
+    return web.json_response(await _hub(request).councils.stop(request.match_info["id"]))
+
+
+async def delete_council(request):
+    await _hub(request).councils.delete(request.match_info["id"])
+    return web.json_response({"ok": True})
+
+
+async def council_section(request):
+    hub = _hub(request)
+    return web.json_response(hub.councils.section(request.match_info["id"], request.query.get("id", "")))
+
+
 async def all_events(request):
     hub = _hub(request)
     since = _int_query(request, "since", 0, 0, 2**62)
@@ -570,6 +604,12 @@ def create_app(hub: Hub) -> web.Application:
     r.add_post("/api/threads/{id}/messages", post_message)
     r.add_post("/api/threads/{id}/stop", stop_thread)
     r.add_delete("/api/threads/{id}", delete_thread)
+    r.add_post("/api/councils", create_council)
+    r.add_get("/api/councils/{id}", get_council)
+    r.add_post("/api/councils/{id}/say", say_council)
+    r.add_post("/api/councils/{id}/stop", stop_council)
+    r.add_delete("/api/councils/{id}", delete_council)
+    r.add_get("/api/councils/{id}/section", council_section)
     r.add_get("/api/events", all_events)
     r.add_get("/ws", ws_handler)
     r.add_get("/{tail:.*}", static_handler)
