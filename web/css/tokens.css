@@ -51,7 +51,7 @@
   /* background aurora */
   --wash-peach: rgba(var(--core-b-rgb), .13);
   --wash-sky: rgba(var(--core-a-rgb), .14);
-  --wash-mint: rgba(var(--rose-rgb), .05);
+  --wash-mint: transparent;
   --dot-grid: transparent;
 
   /* type */

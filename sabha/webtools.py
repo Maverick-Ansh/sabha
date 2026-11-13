@@ -308,7 +308,11 @@ def keywords(query: str, limit: int = 8) -> list[str]:
 
 
 def relevant(hits: list[dict], words: list[str]) -> list[dict]:
-    """Keep results that mention at least two of the query's keywords (one, for a one-word query)."""
+    """Keep results that mention at least two of the query's keywords (one, for a one-word query).
+
+    Numbers do not count: a year in the query matches the date on any page.
+    """
+    words = [w for w in words if not w.isdigit()] or words
     need = min(2, len(words))
     keep = []
     for h in hits:
@@ -318,7 +322,7 @@ def relevant(hits: list[dict], words: list[str]) -> list[dict]:
     return keep
 
 
-def search(query: str, n: int = 6, strict: bool = False) -> tuple[list[dict], str]:
+def search(query: str, n: int = 6, strict: bool = False, wiki: bool = True) -> tuple[list[dict], str]:
     """Web search without a key. Returns (results, engine name). Results: title, url, snippet.
 
     With strict=True a result must mention the query's keywords, so an engine that
@@ -326,7 +330,8 @@ def search(query: str, n: int = 6, strict: bool = False) -> tuple[list[dict], st
     """
     errors = []
     words = keywords(query, 12) if strict else []
-    for name, fn in (("duckduckgo", _ddg), ("bing", _bing), ("wikipedia", _wikipedia)):
+    engines = (("duckduckgo", _ddg), ("bing", _bing), ("wikipedia", _wikipedia))
+    for name, fn in engines if wiki else engines[:2]:
         try:
             hits = fn(query, n + 4 if strict else n)
             if strict:
@@ -349,7 +354,7 @@ def lookup(query: str, n: int = 4) -> tuple[list[dict], str, str]:
     hits: list[dict] = []
     engine = ""
     try:
-        hits, engine = search(q, n, strict=True)
+        hits, engine = search(q, n, strict=True, wiki=False)   # Wikipedia matches too loosely to settle a research point
     except WebError:
         pass
     if len(hits) < 2:
@@ -562,9 +567,14 @@ def main(argv: list[str] | None = None) -> int:
             query, n = " ".join(args.query), max(1, min(args.n, 10))
             try:
                 hits, engine = search(query, n, strict=True)
-            except WebError:
-                hits, engine = search(query, n)
-                engine += ", loose match"
+            except WebError:  # engines refused or sent unrelated pages: say so, and offer arXiv instead of junk
+                found = papers(" ".join(keywords(query, 4)), n)
+                print("No relevant web results (the search engines refused or sent unrelated pages).")
+                if not found:
+                    print("arXiv has nothing for these keywords either. Try fewer or different keywords.")
+                    return 0
+                hits, engine = [{"title": f"{p['title']} ({p['date'][:4]})", "url": p["url"],
+                                 "snippet": p["abstract"]} for p in found], "arXiv instead"
             print(f"{len(hits)} results ({engine})")
             for i, h in enumerate(hits, 1):
                 print(f"\n{i}. {h['title']}\n   {h['url']}\n   {h['snippet'][:300]}")
