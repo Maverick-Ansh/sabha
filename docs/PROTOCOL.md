@@ -39,6 +39,8 @@ All ids are short strings (`m_`, `a_`, `ms_`, `t_`, `msg_` prefix + 8 hex). All 
   "served_name": "qwen27",              // the model id the endpoint expects
   "api_key_env": "",                    // name of an env var holding the key; "" = none
   "context_window": 24576,
+  "extra_body": {},                     // merged into every chat request the hub itself sends (Talk, plans,
+                                        // the chat harness), e.g. {"chat_template_kwargs":{"enable_thinking":false}}
   "status": "ready",                    // unknown | starting | ready | down
   "launch": null,                       // or { "cmd": "...", "env": {..}, "pid": 123, "started_ts": 0 }
   "notes": "" }

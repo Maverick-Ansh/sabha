@@ -127,6 +127,9 @@ async def stream_chat(
     }
     if max_tokens:
         body["max_tokens"] = max_tokens
+    extra = model.get("extra_body")
+    if isinstance(extra, dict):  # per-model request fields, e.g. chat_template_kwargs
+        body.update({k: v for k, v in extra.items() if k not in ("model", "messages", "stream")})
     text_parts: list[str] = []
     think_parts: list[str] = []
     usage: dict | None = None

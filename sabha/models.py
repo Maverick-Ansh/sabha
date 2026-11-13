@@ -75,6 +75,11 @@ def clean_model_fields(body: dict, partial: bool) -> dict:
         if cw <= 0:
             raise ApiError(400, "context_window must be positive")
         out["context_window"] = cw
+    if "extra_body" in body:
+        extra = body["extra_body"] if body["extra_body"] is not None else {}
+        if not isinstance(extra, dict):
+            raise ApiError(400, "extra_body must be a JSON object")
+        out["extra_body"] = extra
     if not partial and "name" not in out:
         raise ApiError(400, "name is required")
     return out
@@ -126,6 +131,7 @@ class ModelManager:
             m.setdefault("notes", "")
             m.setdefault("api_key_env", "")
             m.setdefault("context_window", 32768)
+            m.setdefault("extra_body", {})
             if isinstance(m.get("launch"), dict):
                 m["launch"]["pid"] = None
             m["status"] = "ready" if m.get("kind") == "mock" else "unknown"
@@ -154,6 +160,7 @@ class ModelManager:
             "served_name": f.get("served_name") or ("" if kind == "mock" else f["name"]),
             "api_key_env": f.get("api_key_env", ""),
             "context_window": f.get("context_window", 32768),
+            "extra_body": f.get("extra_body", {}),
             "status": "ready" if kind == "mock" else "unknown",
             "launch": None,
             "notes": f.get("notes", ""),

@@ -41,7 +41,7 @@ you can see the whole app move without any model behind it.
 ## Run it for real on Colab or Kaggle
 
 Open `colab/sabha_colab.ipynb` and run the cells. They clone this repo, install the
-DeepSeek Harness, start the hub in the background, and print one link like
+DeepSeek Harness and vLLM, start the hub in the background, and print one link like
 
 ```
 https://something.trycloudflare.com/#token=…
@@ -80,7 +80,13 @@ Sabha starts runs, records every event, and shows them to you.
 Anything that speaks the OpenAI chat API works: vLLM, llama.cpp server, TGI, a remote
 endpoint. Give each model a `kind` (chat, decision, embedding, custom) so you can tell
 them apart in the UI. For agent work the server must support tool calling. On vLLM that
-means `--enable-auto-tool-choice --tool-call-parser <parser for your model>`.
+means `--enable-auto-tool-choice --tool-call-parser <parser for your model>`. The parser must
+match the model: Qwen3 and Qwen3.5 need `qwen3_xml` (with `hermes` their tool calls are dropped
+without an error and the agent only talks). The launch form picks this for you.
+
+Tested on Kaggle's 2x Tesla T4: Qwen3.5-4B on one card and Qwen3.5-9B (4-bit AWQ) on the other,
+vLLM 0.33, dsh 0.2.1-rc.5. `scripts/box_setup.sh` installs Node 24, dsh and vLLM on the box.
+On a 15 GB card keep `--max-num-seqs 8`. The first start of a model takes about 10 minutes.
 
 ## Status
 

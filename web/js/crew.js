@@ -210,7 +210,9 @@ function renderModels(body, cleanup) {
       for (const line of env.value.split('\n')) { const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/); if (m) envObj[m[1]] = m[2]; }
       go.disabled = true;
       try {
-        const model = await post('/api/models', { name: served(), kind: 'chat', base_url: `http://127.0.0.1:${p}/v1`, served_name: served(), context_window: 24576, api_key_env: '' });
+        const model = await post('/api/models', { name: served(), kind: 'chat', base_url: `http://127.0.0.1:${p}/v1`, served_name: served(), context_window: 24576, api_key_env: '',
+          // Qwen3 thinks for minutes before a one-line chat reply; keep Talk and plans quick. Agent runs still think.
+          extra_body: /qwen3/i.test(hf.value) ? { chat_template_kwargs: { enable_thinking: false } } : {} });
         upsert('models', model);
         const r = await post(`/api/models/${enc(model.id)}/launch`, { cmd: cmd.value.trim(), env: envObj });
         upsert('models', r);
