@@ -77,7 +77,7 @@ export function agentRate(agentId) {
 
 // --- activity ("now" lines) ---
 const ACT_TYPES = new Set(['run.thinking', 'run.text', 'run.tool_call', 'run.tool_result', 'run.final',
-  'run.error', 'run.started', 'run.ended', 'plan.proposed', 'human.note', 'human.approved', 'human.stopped']);
+  'run.error', 'run.started', 'run.waiting', 'run.ended', 'plan.proposed', 'human.note', 'human.approved', 'human.stopped']);
 const callTools = new Map(); // call_id -> tool (for result summaries)
 export const toolForCall = (id) => callTools.get(id);
 

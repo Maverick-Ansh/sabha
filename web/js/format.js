@@ -111,7 +111,7 @@ export function kindOf(ev) {
     case 'run.error': return 'err';
     case 'run.ended': return d.ok === false ? 'err' : 'run';
     case 'run.started': return 'run';
-    case 'run.status': return 'status';
+    case 'run.status': case 'run.waiting': return 'status';
     case 'run.stderr': return 'stderr';
     case 'run.raw': return 'raw';
     case 'plan.proposed': return 'plan';
@@ -136,6 +136,7 @@ export function eventSummary(ev, toolName) {
     case 'run.started': return `run ${d.run || ''} started${d.resumed ? ' (resumed)' : ''}`;
     case 'run.ended': return `run ${d.run || ''} ended · exit ${d.exit_code ?? '?'}`;
     case 'run.status': return statusLine(d);
+    case 'run.waiting': return `waiting · ${d.name || 'model'} is still loading`;
     case 'run.stderr': return oneLine(d.line);
     case 'run.raw': return 'raw · ' + oneLine(asText(d.raw));
     case 'plan.proposed': return `plan proposed · ${(d.steps || []).length} steps`;

@@ -139,6 +139,9 @@ class _Handle:
     interrupt: bool = False
 
 
+MODEL_WAIT_S = 1800.0  # longest a run waits for a model that is still loading
+
+
 def _reason_kind(reason) -> str:
     """The `kind` of a dsh reason, which may be an object, a bare string or missing."""
     return str(reason.get("kind", "")) if isinstance(reason, dict) else str(reason or "")
@@ -148,6 +151,7 @@ def _reason_kind(reason) -> str:
 class _RunState:
     final_kind: str = ""
     turn_end_kind: str = ""  # reason of the last `turn_end` status; real dsh reports it there
+    turn_end_error: str = ""  # its error message, when the turn ended in an error
     last_error: str = ""
     step_usage_in_turn: bool = False
 
@@ -553,13 +557,16 @@ class MissionManager:
         elif harness is None:
             ctx.emit("run.error", {"message": f"unknown harness {agent.get('harness')!r}"})
         else:
-            try:
-                await harness.run(ctx)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                log.exception("harness %s crashed", agent.get("harness"))
-                ctx.emit("run.error", {"message": f"harness crashed: {e}"})
+            if model is not None and model.get("status") == "starting":
+                await self._wait_for_model(ctx, model, handle)
+            if not handle.stop_event.is_set():
+                try:
+                    await harness.run(ctx)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    log.exception("harness %s crashed", agent.get("harness"))
+                    ctx.emit("run.error", {"message": f"harness crashed: {e}"})
         code = ctx.exit_code if ctx.exit_code is not None else -1
         ok = code == 0 and state.final_kind == "completed"
         self._event(mission, "run.ended", {"run": run_no, "exit_code": code, "ok": ok,
@@ -571,10 +578,20 @@ class MissionManager:
         elif state.last_error:
             error = state.last_error
         elif state.final_kind:
-            error = f"run ended with reason {state.final_kind!r}"
+            error = state.turn_end_error or f"run ended with reason {state.final_kind!r}"
         else:
             error = f"harness exited with code {code} before a final answer"
         return ok, error
+
+    async def _wait_for_model(self, ctx: RunContext, model: dict, handle: _Handle) -> None:
+        """A model that is still loading refuses connections, and the harness would fail
+        in seconds. Hold the run until the model is ready, goes down, or the user stops."""
+        ctx.emit("run.waiting", {"model_id": model.get("id", ""), "name": model.get("name", ""),
+                                 "why": "the model is still loading"})
+        deadline = time.monotonic() + MODEL_WAIT_S
+        while (model.get("status") == "starting" and not handle.stop_event.is_set()
+               and time.monotonic() < deadline):
+            await asyncio.sleep(1.0)
 
     def _on_event(self, mission: dict, state: _RunState, type_: str, data: dict) -> None:
         """Every run event passes through here: store it, then update the mission."""
@@ -600,7 +617,12 @@ class MissionManager:
                 stats["steps"] += 1
                 counted = True
             elif phase == "turn_end":
-                state.turn_end_kind = _reason_kind(data.get("reason"))
+                reason = data.get("reason")
+                state.turn_end_kind = _reason_kind(reason)
+                err = reason.get("error") if isinstance(reason, dict) else None
+                if isinstance(err, dict):
+                    err = err.get("message")
+                state.turn_end_error = str(err) if err else ""
             if "usage" in data and (phase != "turn_end" or not state.step_usage_in_turn):
                 p, c = usage_tokens(data["usage"])
                 if p or c:

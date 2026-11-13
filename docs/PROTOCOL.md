@@ -195,6 +195,7 @@ These mirror the `dsh --json` stream, so nothing the harness reports is hidden.
 | `run.error` | `{ message }` | `error` |
 | `run.stderr` | `{ line }` harness diagnostics, one line each | stderr |
 | `run.ended` | `{ run, exit_code, ok, duration_s }` | process exit |
+| `run.waiting` | `{ model_id, name, why }` the run is held until the agent's model leaves `starting` (at most 30 min) | hub |
 | `plan.proposed` | `{ steps }` plan waiting for approval | hub |
 | `human.note` | `{ note }` a note was stored | hub |
 | `human.approved` | `{ steps }` | hub |

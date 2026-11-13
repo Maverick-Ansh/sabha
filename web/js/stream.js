@@ -150,6 +150,7 @@ export function createStream(opts = {}) {
       }
       case 'run.started': return add(sep(ev, `run ${d.run || 1} · ${d.harness || 'harness'} · ${d.resumed ? 'resumed' : 'started'}`, 'sep-run'));
       case 'run.ended': return add(sep(ev, `run ${d.run || ''} ended · exit ${d.exit_code ?? '?'}${d.duration_s ? ' · ' + fmtDur(d.duration_s) : ''}`, d.ok === false ? 'sep-run sep-bad' : 'sep-run'));
+      case 'run.waiting': return add(sep(ev, `waiting · ${d.name || 'the model'} is still loading`, 'sep-run'));
       case 'human.approved': return add(sep(ev, `plan approved · ${(d.steps || []).length} steps`, 'sep-human'));
       case 'human.stopped': return add(sep(ev, 'stopped by you', 'sep-human sep-bad'));
       case 'human.note': return add(shell(ev, 'note', h('div.micro', null, d.note && d.note.interrupt ? 'note from you · interrupt' : 'note from you'), h('div.ev-text', null, (d.note && d.note.text) || '')));
