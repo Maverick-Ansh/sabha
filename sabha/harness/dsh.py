@@ -32,6 +32,17 @@ DSH_MISSING = ("dsh not found on PATH; it needs Node >= 24.9 and a pinned versio
                "(pre-releases only): npm i -g @deepseek-ai/dsh@0.2.1-rc.5")
 
 
+# dsh's web_search needs a paid search key (DeepSeek, Exa or Perplexity). Without one the
+# tool fails on every call, and small models burn their steps retrying it. Tell them up front.
+NO_SEARCH_NOTE = (
+    "Box note: the web_search tool has no API key on this machine and always fails, so do not "
+    "call it. web_fetch works. To find research papers, fetch the arXiv API, for example "
+    "https://export.arxiv.org/api/query?search_query=all:%22latent+reasoning%22"
+    "&sortBy=submittedDate&sortOrder=descending&max_results=20 "
+    "(change the quoted phrase). It returns titles, abstracts and links, newest first."
+)
+
+
 def dsh_path() -> str | None:
     """The dsh executable (dsh.cmd on Windows), or None."""
     return shutil.which("dsh")
@@ -165,8 +176,11 @@ class DshHarness(Harness):
 
         task = ctx.task
         persona = (ctx.agent.get("persona") or "").strip()
-        if not ctx.session_id and persona:
-            task = f"{persona}\n\n---\n\n{task}"
+        if not ctx.session_id:
+            if not env.get("DEEPSEEK_API_KEY"):
+                task = f"{NO_SEARCH_NOTE}\n\n{task}"
+            if persona:
+                task = f"{persona}\n\n---\n\n{task}"
 
         try:
             proc = await asyncio.create_subprocess_exec(

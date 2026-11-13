@@ -88,6 +88,10 @@ Tested on Kaggle's 2x Tesla T4: Qwen3.5-4B on one card and Qwen3.5-9B (4-bit AWQ
 vLLM 0.33, dsh 0.2.1-rc.5. `scripts/box_setup.sh` installs Node 24, dsh and vLLM on the box.
 On a 15 GB card keep `--max-num-seqs 8`. The first start of a model takes about 10 minutes.
 
+Web search. dsh's `web_search` tool needs a search key. Set `DEEPSEEK_API_KEY` in the hub's
+environment to turn it on. Without it, Sabha tells each agent that search is off and points it
+at `web_fetch` and the arXiv API, which need no key.
+
 ## Status
 
 Early. Work mode is a base that will grow. Custom non-chat models (JEPA-style world
