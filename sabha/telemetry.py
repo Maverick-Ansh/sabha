@@ -29,10 +29,12 @@ T4_MEM_MB = 15360
 
 
 def detect_platform() -> str:
+    # Kaggle first: a Colab front end attached to a Kaggle backend sets COLAB_RELEASE_TAG
+    # too, and the box that matters (GPUs, session limit) is the Kaggle one.
+    if os.environ.get("KAGGLE_KERNEL_RUN_TYPE") or os.path.isdir("/kaggle/working"):
+        return "kaggle"
     if os.environ.get("COLAB_RELEASE_TAG"):
         return "colab"
-    if os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
-        return "kaggle"
     return "local"
 
 

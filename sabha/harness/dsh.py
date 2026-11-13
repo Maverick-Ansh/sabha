@@ -28,7 +28,8 @@ from .base import Harness, RunContext
 
 log = logging.getLogger("sabha.dsh")
 
-DSH_MISSING = "dsh not found on PATH; install with: npm i -g @deepseek-ai/dsh"
+DSH_MISSING = ("dsh not found on PATH; it needs Node >= 24.9 and a pinned version "
+               "(pre-releases only): npm i -g @deepseek-ai/dsh@0.2.1-rc.5")
 
 
 def dsh_path() -> str | None:

@@ -139,9 +139,15 @@ class _Handle:
     interrupt: bool = False
 
 
+def _reason_kind(reason) -> str:
+    """The `kind` of a dsh reason, which may be an object, a bare string or missing."""
+    return str(reason.get("kind", "")) if isinstance(reason, dict) else str(reason or "")
+
+
 @dataclass
 class _RunState:
     final_kind: str = ""
+    turn_end_kind: str = ""  # reason of the last `turn_end` status; real dsh reports it there
     last_error: str = ""
     step_usage_in_turn: bool = False
 
@@ -593,6 +599,8 @@ class MissionManager:
             elif phase == "step_start":
                 stats["steps"] += 1
                 counted = True
+            elif phase == "turn_end":
+                state.turn_end_kind = _reason_kind(data.get("reason"))
             if "usage" in data and (phase != "turn_end" or not state.step_usage_in_turn):
                 p, c = usage_tokens(data["usage"])
                 if p or c:
@@ -613,8 +621,9 @@ class MissionManager:
                 stats["tool_errors"] += 1
                 counted = True
         elif type_ == "run.final":
-            reason = data.get("reason")
-            state.final_kind = str(reason.get("kind", "")) if isinstance(reason, dict) else str(reason or "")
+            # dsh 0.2.1-rc.5 sends `final` with reason null and puts the reason on the
+            # `turn_end` status just before it, so fall back to that one.
+            state.final_kind = _reason_kind(data.get("reason")) or state.turn_end_kind
             mission["result_text"] = str(data.get("text") or "")
             sid = data.get("session_id")
             if sid and not mission.get("session_id"):

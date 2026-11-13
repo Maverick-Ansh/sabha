@@ -389,7 +389,9 @@ def _read_file(root: Path, rel: str) -> dict:
         raise ApiError(400, "path is required")
     if "\x00" in rel or rel.startswith(("/", "\\")) or os.path.isabs(rel) or re.match(r"^[A-Za-z]:", rel):
         raise ApiError(400, "path must be relative to the mission workspace")
-    target = root / rel
+    # A backslash is a path separator on Windows but an ordinary character on Linux.
+    # Treat it as a separator everywhere, so "..\..\x" is refused on every platform.
+    target = root / rel.replace("\\", "/")
     if not inside(root, target):
         raise ApiError(400, "path escapes the mission workspace")
     target = target.resolve()
