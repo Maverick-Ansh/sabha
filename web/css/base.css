@@ -221,3 +221,8 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .wash { animation: none; }
 }
+
+/* math (KaTeX, rendered by web/js/md.js) */
+.md .math-block { margin: 10px 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.md .katex { font-size: 1.06em; }
+.md .math:not(:has(.katex)) { font-family: var(--f-mono); font-size: .92em; color: var(--ink-2); }

@@ -3,7 +3,34 @@
 // blockquotes, rules, links (http/https/mailto only, rel=noopener) and simple pipe tables.
 import { h } from './dom.js';
 
-const INLINE = /(`+)([\s\S]*?[^`]|[^`])\1(?!`)|\*\*([^*][\s\S]*?)\*\*|__([^_][\s\S]*?)__|\*([^*\s][^*]*?)\*|(^|[^\w])_([^_\s][^_]*?)_(?!\w)|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"*_])/g;
+// ---------- math: $…$, \(…\), $$…$$, \[…\] rendered with KaTeX (loaded on first use from jsDelivr) ----------
+// Math is cut out before bold/italic so `$K_u$` never turns into emphasis. Until KaTeX is loaded (or if it cannot be),
+// the TeX source shows as plain text without the dollars; every pending formula is rendered once it arrives.
+const KATEX = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/';
+let katexState = 'none'; // none | loading | ready | failed
+const pending = new Set();
+function ensureKatex() {
+  if (katexState !== 'none') return;
+  katexState = 'loading';
+  document.head.appendChild(h('link', { rel: 'stylesheet', href: KATEX + 'katex.min.css', crossorigin: 'anonymous' }));
+  const s = h('script', { src: KATEX + 'katex.min.js', crossorigin: 'anonymous' });
+  s.onload = () => { katexState = window.katex ? 'ready' : 'failed'; for (const el of pending) if (el.isConnected) paintMath(el); pending.clear(); };
+  s.onerror = () => { katexState = 'failed'; pending.clear(); };
+  document.head.appendChild(s);
+}
+function paintMath(el) {
+  try {
+    window.katex.render(el.dataset.tex, el, { displayMode: el.classList.contains('math-block'), throwOnError: false, output: 'htmlAndMathml', strict: 'ignore' });
+  } catch { el.textContent = el.dataset.tex; }
+}
+function mathNode(tex, display) {
+  const el = h(display ? 'div' : 'span', { class: display ? 'math math-block' : 'math', 'data-tex': tex.trim() });
+  if (katexState === 'ready') paintMath(el);
+  else { el.textContent = tex.trim(); if (katexState !== 'failed') { pending.add(el); ensureKatex(); } }
+  return el;
+}
+
+const INLINE = /\$\$([^$]+?)\$\$|\\\(([\s\S]+?)\\\)|\$([^\s$](?:[^$\n]*?[^\s$\\])?)\$(?![\d$])|(`+)([\s\S]*?[^`]|[^`])\4(?!`)|\*\*([^*][\s\S]*?)\*\*|__([^_][\s\S]*?)__|\*([^*\s][^*]*?)\*|(^|[^\w])_([^_\s][^_]*?)_(?!\w)|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"*_])/g;
 
 function safeHref(url) {
   const u = String(url || '').trim();
@@ -22,15 +49,18 @@ export function inline(text, depth = 0) {
   let last = 0, m;
   while ((m = re.exec(text))) {
     let start = m.index;
-    if (m[6] !== undefined) start += m[6].length;
+    if (m[9] !== undefined) start += m[9].length;
     if (start > last) pushText(out, text.slice(last, start));
-    if (m[1] !== undefined) out.push(h('code', null, m[2]));
-    else if (m[3] !== undefined) out.push(h('strong', null, inline(m[3], depth + 1)));
-    else if (m[4] !== undefined) out.push(h('strong', null, inline(m[4], depth + 1)));
-    else if (m[5] !== undefined) out.push(h('em', null, inline(m[5], depth + 1)));
-    else if (m[7] !== undefined) out.push(h('em', null, inline(m[7], depth + 1)));
-    else if (m[8] !== undefined) out.push(link(m[8], m[9]));
-    else if (m[10] !== undefined) out.push(link(m[10], m[10]));
+    if (m[1] !== undefined) out.push(mathNode(m[1], true));
+    else if (m[2] !== undefined) out.push(mathNode(m[2], false));
+    else if (m[3] !== undefined) out.push(mathNode(m[3], false));
+    else if (m[4] !== undefined) out.push(h('code', null, m[5]));
+    else if (m[6] !== undefined) out.push(h('strong', null, inline(m[6], depth + 1)));
+    else if (m[7] !== undefined) out.push(h('strong', null, inline(m[7], depth + 1)));
+    else if (m[8] !== undefined) out.push(h('em', null, inline(m[8], depth + 1)));
+    else if (m[10] !== undefined) out.push(h('em', null, inline(m[10], depth + 1)));
+    else if (m[11] !== undefined) out.push(link(m[11], m[12]));
+    else if (m[13] !== undefined) out.push(link(m[13], m[13]));
     last = re.lastIndex;
     if (m[0].length === 0) re.lastIndex++;
   }
@@ -49,6 +79,7 @@ const RE_HR = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
 const RE_LI = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
 const RE_QUOTE = /^\s{0,3}>\s?(.*)$/;
 const RE_TSEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const RE_MATH_OPEN = /^\s{0,3}(\$\$|\\\[)(.*)$/;
 
 function cells(line) {
   let s = line.trim();
@@ -71,6 +102,17 @@ function blocks(lines, depth) {
       while (i < lines.length && !lines[i].trim().startsWith(fence)) body.push(lines[i++]);
       i++;
       out.push(h('pre', m[2] ? { 'data-lang': m[2] } : null, h('code', null, body.join('\n'))));
+      continue;
+    }
+    if ((m = line.match(RE_MATH_OPEN))) { // display math: $$ … $$ or \[ … \], on one line or over several
+      const close = m[1] === '$$' ? '$$' : '\\]';
+      let body = m[2];
+      let end = body.indexOf(close);
+      i++;
+      while (end < 0 && i < lines.length) { body += '\n' + lines[i++]; end = body.indexOf(close); }
+      const tail = end >= 0 ? body.slice(end + close.length).trim() : '';
+      out.push(mathNode(end >= 0 ? body.slice(0, end) : body, true));
+      if (tail) out.push(h('p', null, inline(tail)));
       continue;
     }
     if ((m = line.match(RE_HEAD))) { out.push(h('h' + m[1].length, null, inline(m[2]))); i++; continue; }
@@ -115,7 +157,7 @@ function blocks(lines, depth) {
     // paragraph
     const para = [];
     while (i < lines.length && lines[i].trim() && !RE_FENCE.test(lines[i]) && !RE_HEAD.test(lines[i]) &&
-      !RE_HR.test(lines[i]) && !RE_LI.test(lines[i]) && !RE_QUOTE.test(lines[i])) para.push(lines[i++]);
+      !RE_HR.test(lines[i]) && !RE_LI.test(lines[i]) && !RE_QUOTE.test(lines[i]) && !RE_MATH_OPEN.test(lines[i])) para.push(lines[i++]);
     if (!para.length) { out.push(h('p', null, line)); i++; continue; }
     out.push(h('p', null, inline(para.join('\n'))));
   }
