@@ -342,17 +342,17 @@ MAP_SCHEMA = OBJ(facts=ARR(OBJ(field=ENUM(*FIELDS), text=STR, sec=STR, quote=STR
                  repo_urls=ARR(STR), datasets=ARR(STR))
 CARD_SCHEMA = OBJ(
     one_line=STR, model_type=ARR(ENUM(*MODEL_TYPES)),
-    training_method=OBJ(text=STR, ev=ARR(EV)), architecture=OBJ(text=STR, ev=ARR(EV)),
-    losses=ARR(OBJ(name=STR, form=STR, ev=ARR(EV))),
-    data=ARR(OBJ(name=STR, size=STR, license=STR, ev=ARR(EV))),
-    results=ARR(OBJ(claim=STR, metric=STR, value=STR, setting=STR, baselines=ARR(STR), ev=ARR(EV))),
-    hypotheses=ARR(OBJ(text=STR, ev=ARR(EV))),
-    limitations=ARR(OBJ(text=STR, by=ENUM("authors", "reader"), ev=ARR(EV))),
-    compute=OBJ(text=STR, repro_cost=ENUM("low", "medium", "high", "unknown"), ev=ARR(EV)),
+    training_method=OBJ(text=STR, ev=ARR(STR)), architecture=OBJ(text=STR, ev=ARR(STR)),
+    losses=ARR(OBJ(name=STR, form=STR, ev=ARR(STR))),
+    data=ARR(OBJ(name=STR, size=STR, license=STR, ev=ARR(STR))),
+    results=ARR(OBJ(claim=STR, metric=STR, value=STR, setting=STR, baselines=ARR(STR), ev=ARR(STR))),
+    hypotheses=ARR(OBJ(text=STR, ev=ARR(STR))),
+    limitations=ARR(OBJ(text=STR, by=ENUM("authors", "reader"), ev=ARR(STR))),
+    compute=OBJ(text=STR, repro_cost=ENUM("low", "medium", "high", "unknown"), ev=ARR(STR)),
     baselines=ARR(STR),
     causal_evidence=ENUM("intervention", "counterfactual_eval", "none_prediction_only", "n/a"),
     claims=ARR(OBJ(text=STR, q=STR, status=ENUM("measured", "hypothesis"), relation=ENUM("new", "supports", "contradicts"),
-                   ref=STR, ev=ARR(EV))),
+                   ref=STR, ev=ARR(STR))),
     questions_for_others=ARR(OBJ(to=STR, q=STR)))
 
 _ORDER = [("method|approach|model|architecture|framework|preliminar", 0), ("train|objective|loss|learning|pretrain", 1),
@@ -439,6 +439,7 @@ At most 10 facts, the ones that matter most for the track questions first. Skip 
     for sec, mp in zip(chunks, maps):
         for f in mp.get("facts", []):
             total += 1
+            f["quote"] = (f.get("quote") or "").strip().strip("\"'“”").strip()
             q = src.norm(f.get("quote", ""))
             if len(q) >= 12 and q in fullnorm:
                 facts.append({**f, "sec": f.get("sec") or sec["title"]})
@@ -449,10 +450,14 @@ At most 10 facts, the ones that matter most for the track questions first. Skip 
         m.mark(aid, state="failed", why=f"quote check: {len(facts)}/{total} facts verified")
         return "failed"
     near = _near_claims(m, tid, meta["abstract"], idx)
-    flines = "\n".join(f"[{f['field']}|{f['status']}] {f['text']} -- \"{f['quote']}\" ({f['sec']})" for f in facts[:60])
+    facts = facts[:60]
+    fid = {f"F{i}": f for i, f in enumerate(facts, 1)}
+    flines = "\n".join(f"{k} [{f['field']}|{f['status']}] {f['text']} || section: {f['sec']} || quote: {f['quote']}" for k, f in fid.items())
     try:
         card = llm.chat_json("deep", _sys("""You write the paper card: the team's permanent memory of this paper. Answer in JSON.
-Use ONLY the verified facts and metadata below. Copy evidence quotes exactly from the facts (they were checked against the paper).
+Use ONLY the verified facts (F1, F2, ...) and metadata below. ev = a list of fact ids that support the item, like ["F3","F7"].
+Never copy quotes into ev; code attaches the verified quote and section for each id. An item with no supporting fact gets ev [].
+license: a real license name (MIT, Apache-2.0, CC-BY-4.0, ...) that a fact states, else "not_stated".
 Anything the facts do not cover is "not_stated". results: only numbers that appear in the facts.
 claims: 2 to 5 claims that answer your track questions (q = the question id). relation: supports / contradicts a ledger claim
 in the packet (ref = its id) or new (ref = ""). causal_evidence: intervention or counterfactual_eval only if the paper actually
@@ -465,6 +470,26 @@ questions_for_others: questions this paper raises that another track should answ
         m.mark(aid, state="queued", why=f"reduce llm: {str(e)[:120]}")
         return "failed"
     lint = []
+
+    def resolve(lst):
+        out = []
+        for x in lst or []:
+            k = (x if isinstance(x, str) else str((x or {}).get("fact") or "")).strip().upper()
+            f = fid.get(k)
+            if f and all(o["fact"] != k for o in out):
+                out.append({"fact": k, "sec": f["sec"], "quote": f["quote"]})
+        return out
+    for k in ("training_method", "architecture", "compute"):
+        if isinstance(card.get(k), dict):
+            card[k]["ev"] = resolve(card[k].get("ev"))
+    for k in ("losses", "data", "results", "hypotheses", "limitations", "claims"):
+        for it in card.get(k, []) or []:
+            it["ev"] = resolve(it.get("ev"))
+    card["model_type"] = list(dict.fromkeys((card.get("model_type") or []) + (gate.get("model_type") or [])))[:3]
+    for d in card.get("data", []) or []:
+        if not re.search(r"MIT|Apache|BSD|GPL|CC[- ]?BY|CC0|Creative Commons|proprietary|non-commercial|research use|licen[cs]e",
+                         d.get("license", "") or "", re.I):
+            d["license"] = "not_stated"
     # evidence must be real quotes
     for k in ("training_method", "architecture", "compute"):
         if isinstance(card.get(k), dict):
@@ -483,6 +508,10 @@ questions_for_others: questions this paper raises that another track should answ
             lint.append(f"result dropped, number not in paper: {r.get('value', '')[:40]}")
     card["results"] = good
     if card.get("causal_evidence") not in ("intervention", "counterfactual_eval"):
+        card["causal_evidence"] = card.get("causal_evidence") or "none_prediction_only"
+        if re.search(r"\bcausal", card.get("one_line", ""), re.I):
+            card["one_line"] = re.sub(r"\bcausal(ly)?[- ]", "", card["one_line"], flags=re.I) + " (no causal test in the paper)"
+            lint.append("causal wording removed from one_line")
         for cl in card.get("claims", []):
             if re.search(r"\bcausal", cl.get("text", ""), re.I):
                 cl["text"] = "(prediction only, no causal test) " + cl["text"]
