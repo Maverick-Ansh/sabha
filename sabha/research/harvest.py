@@ -8,7 +8,7 @@ with embeddings, no search API needed.
 Resumable: the resumption token is saved after every page, so a restart
 continues where it stopped. Output: <out>/<set>/page_00001.jsonl ...
 
-    python -m sabha.research.harvest --out /kaggle/working/arxiv_meta --set cs --from 2015-01-01
+    python -m sabha.research.harvest --out /kaggle/working/arxiv_meta --set cs --range 2025-01-01:
 """
 from __future__ import annotations
 
@@ -74,8 +74,8 @@ def parse_page(xml: str):
     return recs, token, total
 
 
-def harvest(out: str, oai_set: str, since: str, pause: float = 4.0) -> None:
-    d = os.path.join(out, oai_set)
+def harvest(out: str, oai_set: str, since: str, until: str = "", pause: float = 3.0) -> None:
+    d = os.path.join(out, f"{oai_set}_{since}_{until or 'now'}")
     os.makedirs(d, exist_ok=True)
     state_p = os.path.join(d, "_state.json")
     state = json.load(open(state_p)) if os.path.exists(state_p) else {"page": 0, "token": None, "n": 0}
@@ -87,6 +87,8 @@ def harvest(out: str, oai_set: str, since: str, pause: float = 4.0) -> None:
             params = {"verb": "ListRecords", "resumptionToken": state["token"]}
         else:
             params = {"verb": "ListRecords", "metadataPrefix": "arXiv", "set": oai_set, "from": since}
+            if until:
+                params["until"] = until
         recs, token, total = parse_page(_fetch(params))
         state["page"] += 1
         tmp = os.path.join(d, f"page_{state['page']:05d}.jsonl.tmp")
@@ -111,7 +113,11 @@ if __name__ == "__main__":
     ap.add_argument("--out", required=True)
     ap.add_argument("--set", dest="sets", action="append", default=None,
                     help="OAI set, e.g. cs, stat, eess, math (repeatable)")
-    ap.add_argument("--from", dest="since", default="2015-01-01")
+    ap.add_argument("--range", dest="ranges", action="append", default=None,
+                    help="FROM:UNTIL datestamp window (UNTIL may be empty), newest first; repeatable")
     a = ap.parse_args()
-    for s in a.sets or ["cs"]:
-        harvest(a.out, s, a.since)
+    # newest windows first, so the most recent papers are searchable soonest
+    for rng in a.ranges or ["2025-01-01:", "2023-01-01:2024-12-31", "2015-01-01:2022-12-31"]:
+        since, until = rng.split(":")
+        for s in a.sets or ["cs"]:
+            harvest(a.out, s, since, until)
