@@ -560,7 +560,7 @@ questions_for_others: questions this paper raises that another track should answ
         return {"url": g["url"], "status": how, "license": g.get("license"), "last_push": g.get("last_push"),
                 "stars": g.get("stars"), "src": origin, "why": g.get("why", "")}
     for u in in_text[:4]:
-        g = src.official_repo(u, aid, meta["title"], full)
+        g = src.official_repo(u, aid, meta["title"], full, meta.get("authors"))
         if g.get("official"):
             repo = _rep(g, "verified", "paper")
             break
@@ -573,7 +573,7 @@ questions_for_others: questions this paper raises that another track should answ
         try:
             for h in src.tavily(f"\"{meta['title'][:120]}\" official code github", 5):
                 for u in src.repo_urls(h["url"] + " " + h["content"])[:3]:
-                    g = src.official_repo(u, aid, meta["title"])
+                    g = src.official_repo(u, aid, meta["title"], "", meta.get("authors"))
                     if g.get("official"):
                         repo = _rep(g, "verified", "tavily")
                         break

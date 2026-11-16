@@ -1,4 +1,4 @@
-# One-time recheck of every card's "verified" repo with the official-repo rule (sources.official_repo).
+# Second recheck with the stricter rule (no paper lists, personal repos must belong to an author).
 # Pulls the new code first; the running daemon keeps its old modules until the steering restart.
 git pull -q --autostash && git log --oneline -1
 python3 - <<'PY'
@@ -21,7 +21,7 @@ for f in sorted(glob.glob(D + "*.json")):
         except Exception as e:
             print("paper fetch failed", c["id"], e)
     try:
-        g = src.official_repo(r["url"], c["id"], c.get("title", ""), full)
+        g = src.official_repo(r["url"], c["id"], c.get("title", ""), full, c.get("authors"))
     except Exception as e:
         print("ERR", c["id"], type(e).__name__, e)
         n["err"] += 1

@@ -225,7 +225,35 @@ def github_repo(url: str) -> dict:
     return {"exists": True, "url": d.get("html_url"), "license": (d.get("license") or {}).get("spdx_id"),
             "last_push": (d.get("pushed_at") or "")[:10], "stars": d.get("stargazers_count", 0),
             "archived": d.get("archived", False), "description": d.get("description") or "", "homepage": d.get("homepage") or "",
-            "full_name": d.get("full_name") or f"{o}/{r}", "branch": d.get("default_branch") or "HEAD"}
+            "full_name": d.get("full_name") or f"{o}/{r}", "branch": d.get("default_branch") or "HEAD",
+            "owner": (d.get("owner") or {}).get("login", o), "owner_type": (d.get("owner") or {}).get("type", "")}
+
+
+LISTY = re.compile(r"awesome|paper[-_ ]?list|papers|survey|reading|resources|collection|curated", re.I)
+
+
+def _owner_is_author(g: dict, authors: list[str]) -> bool:
+    """An organisation passes (labs publish under org accounts). A personal account must be one of the authors:
+    an author name token (4+ letters) inside the login, or the profile's last name equal to an author's."""
+    if g.get("owner_type") == "Organization":
+        return True
+    toks = {t for a in authors or [] for t in re.findall(r"[a-z]+", unicodedata.normalize("NFKD", a).lower()) if len(t) >= 4}
+    login = re.sub(r"[^a-z]", "", (g.get("owner") or "").lower())
+    if any(t in login for t in toks):
+        return True
+    try:
+        tok = open("/root/.gh_token").read().strip() if os.path.exists("/root/.gh_token") else ""
+        raw, _, _ = _get(f"https://api.github.com/users/{g.get('owner')}", "github", 0.5, timeout=20, tries=1,
+                         headers={"Accept": "application/vnd.github+json", **({"Authorization": f"Bearer {tok}"} if tok else {})})
+        name = re.findall(r"[a-z]+", unicodedata.normalize("NFKD", json.loads(raw).get("name") or "").lower())
+    except Exception:
+        return False
+    last = set()
+    for a in authors or []:  # "Last, First" (citation_author) or "First Last"
+        w = re.findall(r"[a-z]+", unicodedata.normalize("NFKD", a.split(",")[0]).lower())
+        if w:
+            last.add(w[-1])
+    return bool(name) and name[-1] in last
 
 
 # "our code is available at", "code will be released", "project page": a link the paper gives as ITS OWN code
@@ -233,11 +261,11 @@ CODE_CTX = re.compile(r"\b(our|the|this)\s+(source\s+)?(code|codes|implementatio
                       r"|\bavailable\s+(at|on|from)\b|\bproject\s+page\b|\bopen[- ]?sourced?\b|\breleased?\s+(at|on)\b", re.I)
 
 
-def official_repo(url: str, aid: str, title: str, full: str = "") -> dict:
+def official_repo(url: str, aid: str, title: str, full: str = "", authors: list[str] | None = None) -> dict:
     """github_repo() plus 'official': is this THIS paper's code? A repo only exists is not enough
     (papers link the repos they build on, and search hits carry any GitHub link). Official when the
     paper links it next to code-availability words, or its README / description / homepage names the
-    arXiv id or the title."""
+    arXiv id or the title AND it is not a paper list AND its owner is an org or one of the authors."""
     g = github_repo(url)
     if not g.get("exists"):
         return g
@@ -247,18 +275,26 @@ def official_repo(url: str, aid: str, title: str, full: str = "") -> dict:
         for mm in re.finditer(re.escape("github.com/" + fn), low):
             if CODE_CTX.search(low[max(0, mm.start() - 250):mm.start() + 40]):
                 return {**g, "official": True, "why": "paper links it as its code"}
+    if LISTY.search(fn.split("/")[-1]):
+        return {**g, "official": False, "why": "a paper list, not code"}
     base = re.sub(r"v\d+$", "", aid or "")
     tnorm = norm(title)[:60]
     meta = " ".join([g.get("description", ""), g.get("homepage", "")])
-    if (base and base in meta) or (len(tnorm) > 20 and tnorm in norm(meta)):
-        return {**g, "official": True, "why": "repo description names the paper"}
-    for name in ("README.md", "readme.md", "README.rst"):
-        try:
-            raw, _, _ = _get(f"https://raw.githubusercontent.com/{g['full_name']}/{g['branch']}/{name}", "ghraw", 0.3, timeout=20, tries=1)
-        except Exception:
-            continue
-        txt = raw.decode("utf-8", "replace")[:60000]
-        if (base and base in txt) or (len(tnorm) > 20 and tnorm in norm(txt)):
-            return {**g, "official": True, "why": "README names the paper"}
-        break
-    return {**g, "official": False, "why": "exists, but nothing ties it to this paper"}
+    named = "repo description names the paper" if (base and base in meta) or (len(tnorm) > 20 and tnorm in norm(meta)) else ""
+    if not named:
+        for name in ("README.md", "readme.md", "README.rst"):
+            try:
+                raw, _, _ = _get(f"https://raw.githubusercontent.com/{g['full_name']}/{g['branch']}/{name}", "ghraw", 0.3, timeout=20, tries=1)
+            except Exception:
+                continue
+            txt = raw.decode("utf-8", "replace")[:60000]
+            if len(set(re.findall(r"\b\d{4}\.\d{4,5}\b", txt)) - {base}) > 12:
+                return {**g, "official": False, "why": "README cites many papers: a list or survey"}
+            if (base and base in txt) or (len(tnorm) > 20 and tnorm in norm(txt)):
+                named = "README names the paper"
+            break
+    if not named:
+        return {**g, "official": False, "why": "exists, but nothing ties it to this paper"}
+    if not _owner_is_author(g, authors or []):
+        return {**g, "official": False, "why": named + ", but the owner is not an author (third-party code?)"}
+    return {**g, "official": True, "why": named}

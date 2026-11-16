@@ -219,6 +219,22 @@ class Daemon:
             self.err(f"git push: {out[-200:]}")
             return False
 
+    def standing_steering(self) -> None:
+        """Steering state lives in memory, so a restart (steering restart: true) would drop it. Re-read the
+        lessons, priority topics and bans of the current steering.md at mission start; seq is not re-applied."""
+        try:
+            import yaml
+            text = open(self.m.p("steering.md"), encoding="utf-8").read()
+            mm = re.search(r"```ya?ml\n(.*?)```", text, re.S)
+            d = yaml.safe_load(mm.group(1) if mm else text) or {}
+        except Exception:
+            return
+        for k in ("priority_topics", "lessons"):
+            self.steer[k] = list(dict.fromkeys(self.steer.get(k, []) + [str(x) for x in d.get(k) or []]))[-30:]
+        for k, v in (d.get("banned") or {}).items():
+            b = self.steer.setdefault("banned", {})
+            b[k] = sorted(set(b.get(k, []) + list(v or [])))
+
     def pull_steering(self) -> None:
         with self.git_lock:
             sh("git fetch -q origin && git merge -q --no-edit origin/main", self.repo)
@@ -246,7 +262,7 @@ class Daemon:
             res.append(f"weights {w}")
         for k in ("priority_topics", "lessons"):
             if d.get(k):
-                self.steer[k] = (self.steer.get(k, []) + list(d[k]))[-30:]
+                self.steer[k] = list(dict.fromkeys(self.steer.get(k, []) + [str(x) for x in d[k]]))[-30:]
                 res.append(f"{k} +{len(d[k])}")
         if d.get("banned"):
             b = self.steer.setdefault("banned", {})
@@ -454,6 +470,7 @@ class Daemon:
             if not m.plan.get("tracks"):
                 A.plan_mission(m)
             self.set_status("running")
+            self.standing_steering()
             A.rebuild_playbook(m, self.steer.get("lessons", []))
             n = m.requeue_stale(0)
             print(f"[run] mission {m.id}: {len(m.track_ids())} tracks, {n} stale requeued", flush=True)
