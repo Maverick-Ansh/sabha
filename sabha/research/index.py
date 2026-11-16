@@ -79,7 +79,10 @@ def build(device: str = "cuda:0", once: bool = False) -> None:
             np.save(f"{IDX}/{key}.tmp.npy", vec)
             os.replace(f"{IDX}/{key}.tmp.npy", f"{IDX}/{key}.npy")
             new += 1
-            print(f"[index] {key} {len(recs)} rows {time.time() - t0:.1f}s", flush=True)
+            dt = time.time() - t0
+            print(f"[index] {key} {len(recs)} rows {dt:.1f}s", flush=True)
+            # share the GPU with the vLLM server on it: work at most 1/(1+SLEEP) of the time
+            time.sleep(dt * float(os.environ.get("SABHA_INDEX_SLEEP", "3")))
         if once:
             return
         time.sleep(1 if new else 60)
