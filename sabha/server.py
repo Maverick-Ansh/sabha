@@ -261,7 +261,7 @@ def _token_ok(request: web.Request, cfg: Config) -> bool:
     header = request.headers.get("Authorization", "")
     if header.lower().startswith("bearer "):
         supplied = header[7:].strip()
-    elif request.path == "/ws":
+    elif request.path == "/ws" or request.path.startswith("/api/research/export/"):  # a socket or a plain download link sends no header
         supplied = request.query.get("token", "")
     return bool(supplied) and hmac.compare_digest(supplied.encode(), cfg.token.encode())
 
