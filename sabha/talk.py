@@ -35,13 +35,16 @@ log = logging.getLogger("sabha.talk")
 
 CARD_MAX_CHARS = 6000
 MAX_HOPS = 6
+# a reply that ends by announcing a lookup it never made ("Let's start by searching memory.") gets one nudge
+PROMISE = re.compile(r"\b(let me|let['’]s|i['’]ll|i will|start by|going to|i am going|i'm going)\b", re.I)
+NUDGE = "(Sabha: go ahead now. Call the tools you said you would use, then answer the owner.)"
 
 TALK_RULES = """You are {name}, one of the agents of Sabha: the owner's own AI team, running on their GPU box. {role}
 {persona}
 How to talk:
 - Talk like a thoughtful colleague: warm, direct and curious. Small talk gets a short, friendly answer; a real question gets a full one.
 - First understand what the owner wants. If a request is genuinely unclear, ask one short question. Otherwise go ahead.
-- When something needs more than one step, say your plan in two to four short lines, then carry it out in this same reply.
+- When something needs more than one step, say your plan in two to four short lines, then carry it out in this same reply. Never end a reply by saying you will look something up: call the tool right away.
 - You can use the box's whole memory: research runs (briefs, paper cards, track reports, syntheses), councils (paper discussions and verdicts), Work missions and their reports, earlier chats, and the owner's research taste. Whenever a question touches anything done before, call search_memory first (try other words if it misses), read_memory for the details, then answer and name what you used by its id in brackets, like [card:001-x/2301.08243].
 - For facts from the outside world, call web_search and read_page, and name your sources.
 - Never invent papers, numbers or findings. If memory and the web have nothing, say so plainly.
@@ -502,6 +505,11 @@ class TalkManager:
                 await self._mock_stream(thread, agent, model, piece)
             else:
                 system = await asyncio.to_thread(self._system, thread, agent)
+                pre = await asyncio.to_thread(self._prefetch, thread)
+                if pre:  # memory that matches the owner's message, handed over before the model even asks
+                    system += pre[0]
+                    steps.append(pre[1])
+                    on_step(pre[1])
                 msgs = self._history(thread, agent, model, system)
                 await self._converse(thread, model, msgs, piece, on_step, steps, text_parts)
         except asyncio.CancelledError:
@@ -530,7 +538,7 @@ class TalkManager:
     async def _converse(self, thread: dict, model: dict, msgs: list[dict], piece, on_step, steps: list, text_parts: list) -> None:
         """One Talk reply: stream, run the tool calls the model asks for, feed the results back, repeat (MAX_HOPS)."""
         use_tools = model.get("id") not in self.no_tools
-        hop = 0
+        hop = nudged = 0
         while hop <= MAX_HOPS:
             calls: list[dict] = []
             try:
@@ -544,6 +552,13 @@ class TalkManager:
                     continue
                 raise
             if not calls:
+                tail = (text or "").strip()[-300:]
+                if use_tools and not nudged and hop < MAX_HOPS and tail and not tail.endswith("?") and PROMISE.search(tail):
+                    nudged = 1
+                    msgs += [{"role": "assistant", "content": text}, {"role": "user", "content": NUDGE}]
+                    piece("text", "\n\n")
+                    hop += 1
+                    continue
                 return
             ids = [c["id"] or f"call_{hop}_{i}" for i, c in enumerate(calls)]
             msgs.append({"role": "assistant", "content": text or "", "tool_calls": [
@@ -561,6 +576,19 @@ class TalkManager:
             if "".join(text_parts).strip() and not "".join(text_parts).endswith("\n"):
                 piece("text", "\n\n")
             hop += 1
+
+    def _prefetch(self, thread: dict) -> tuple[str, dict] | None:
+        """Search memory for the owner's last message (blocking). Returns (prompt block, step) or None."""
+        recall = getattr(self.hub, "recall", None)
+        last = next((m["content"] for m in reversed(thread["messages"]) if m["role"] == "user"), "")
+        if recall is None or len(last.split()) < 3:  # small talk needs no memory
+            return None
+        hits = [h for h in recall.search(last, "", 6, exclude=f"chat:{thread['id']}") if h["score"] >= 1.5]
+        if not hits:
+            return None
+        block = ("\n\nMEMORY THAT MATCHES THE OWNER'S LAST MESSAGE (found automatically; read_memory an id for the full text, "
+                 "search_memory for more):\n" + "\n".join(f"[{h['id']}] {h['title']}: {h['snippet']}" for h in hits))
+        return block, {"tool": "search_memory", "label": "looked in memory for your message", "result": f"{len(hits)} found"}
 
     def _tool(self, name: str, args: dict, thread_id: str) -> tuple[str, dict]:
         """Run one read-only Talk tool. Returns (text for the model, step for the app). Blocking."""
