@@ -28,7 +28,11 @@ export function createBoot() {
         h('span.b-dot'), `${s.short || s.id}: ${WORD[s.status] || s.status}${t}`));
     }
     const busy = (b.steps || []).find((s) => ['running', 'downloading', 'starting'].includes(s.status));
-    setText(note, b.note || (b.ready ? 'All set. Talk, Council, Work and Research are ready.' : !b.alive ? 'The setup helper is not reporting (run the notebook cell again).' : busy ? busy.detail || '' : ''));
+    const anyReady = (b.steps || []).some((s) => s.status === 'ready');
+    setText(note, b.note || (b.ready ? 'All set. Talk, Council, Work and Research are ready.'
+      : !b.alive ? 'The setup helper is not reporting (run the notebook cell again).'
+      : busy && busy.id === 'tools' ? busy.detail || ''
+      : busy ? `Models load, compile and warm up: about 10 minutes the first time.${anyReady ? ' The ready one already answers in Talk, Council and Work.' : ''}` : ''));
   }
   async function tick() {
     let b = null;

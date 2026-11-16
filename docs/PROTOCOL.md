@@ -413,3 +413,33 @@ counts with `fallback: true` and the reason in `error`.
 
 `kind` is one of `status` (STATUS.md), `digest` (DIGEST.md), `synthesis`, `brief`, and with `track=<tid>`:
 `report`, `track_digest`, `assignment`. 404 when the file is not written yet.
+
+## 9. Box, settings, taste and research runs started from the app
+
+The notebook cell runs `sabha/box.py up`. It starts the hub (`--data <base>/sabha_data`) and a detached
+supervisor, which writes `<data>/boot.json` every few seconds while it installs the tools and starts one
+vLLM server per GPU (deep = Qwen3.5-9B AWQ on GPU 0, port 8001; reader = Qwen3.5-4B on the next GPU, port 8002;
+one GPU = reader only). It registers each model (`served_name` = `deep` / `reader`, `extra_body` turns thinking
+off) and, once, a default crew of four agents.
+
+| Method | Path | Body | Answer |
+|---|---|---|---|
+| GET | `/api/boot` | | `{present, ready, stage, note, alive, age_s, gpus, steps:[{id, short, label, status, detail, secs, expect_s}]}`. `present:false` = the hub was not started by the launcher. Step status: `waiting`, `running`, `downloading`, `starting`, `ready`, `done`, `failed`. |
+| GET | `/api/settings` | | `{git_repo, tavily_key:{set, hint, source}, hf_token:{…}, git_token:{…}, search, git_sync}`. A key never comes back, only `set` and its last 4 characters. |
+| PUT | `/api/settings` | any of `tavily_key`, `hf_token`, `git_repo` (`owner/name`), `git_token`; `""` clears | same as GET. Stored in `<data>/settings.json` (mode 600); the Tavily key goes into the hub's environment at once (web tools, dsh runs and the research daemon inherit it). |
+| GET | `/api/taste` | | `{taste, loves:[…], topic, hours, updated}` |
+| PUT | `/api/taste` | any of `taste` (≤ 6000 chars), `loves` (list or text; arXiv ids are pulled out of links, other lines kept as titles), `topic`, `hours` (0.5 to 12) | same as GET |
+| POST | `/api/research/start` | optional taste fields (saved first) | the run status (below) plus `title`, `note`. 400 when the question is shorter than 12 characters, 409 when a run is going or no model served as `deep`/`reader` is ready. |
+| POST | `/api/research/stop` | `{mode: "finish" \| "now"}` | the run status. `finish` sends the daemon a `finish` command: final reports and synthesis from what is in hand, then it ends. `now` stops it at once. |
+| GET | `/api/research/export/{mission}` | | a zip of the mission folder (brief, taste, plan, cards, track reports, ledgers, synthesis). Accepts `?token=` because a download link sends no header. |
+
+Run status, also under `run` in `GET /api/research`: `{running, mission, started, until, hours, mock, finishing,
+ended, how, git_sync, log}`.
+
+Start writes `missions/<NNN-slug>/{brief.md, taste.md, loves.json}` under the research home (`<data>/research`, or
+`--research-repo`) and starts, detached, `python -m sabha.research.run --mission <id> --once` (in demo mode
+`sabha.research.mock`), the arXiv harvester and the embedding index. Their pids live in `<data>/run/research.json`,
+so a restarted hub finds a run that is still going. The taste reaches the planner (through the brief), System-1
+triage, the reader's gate, every card (`why_it_matters`, shown as "Why it matters to you"), the memory packet of
+every deep step, the track reports and the synthesis. Loved papers are queued first. Git sync runs only when the
+research home is a git checkout: the hub makes it one at Start when a repo and token are set.

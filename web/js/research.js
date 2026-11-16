@@ -82,8 +82,9 @@ export function createResearch() {
   const stats = h('div.r-stats.card', null, stat(nCards, 'cards'), stat(nQueued, 'queued'), stat(nRate, 'per hour'), stat(nLeft, 'left'));
   const rawEl = h('button.r-raw.mono', { title: 'The daemon\'s own status line', onclick: () => rawEl.classList.toggle('open') });
   const synthBtn = h('button.btn', { hidden: true, onclick: () => openDoc('Synthesis', 'synthesis') }, icon('layers', 15), 'Synthesis');
+  const newBtn = h('button.btn.brand', { onclick: () => openMission() }, icon('plus', 15), 'New mission');
   const actions = h('div.r-actions', null,
-    h('button.btn.brand', { onclick: () => openMission() }, icon('plus', 15), 'New mission'),
+    newBtn,
     h('button.btn', { onclick: () => openDoc('Status', 'status') }, icon('log', 15), 'Status'),
     synthBtn);
   const hero = h('header.r-hero', null,
@@ -164,7 +165,7 @@ export function createResearch() {
         empty.append(h('p.dim', null, d.hint || 'This hub has no research data repo.'),
           h('p.mono.dim', null, 'python -m sabha --research-repo /kaggle/working/sabha-research'));
       } else {
-        actions.hidden = false; ledeEl.hidden = true;
+        actions.hidden = true; ledeEl.hidden = true;
         setText(titleEl, 'No research yet.');
         empty.append(h('p.dim', null, 'Write your research taste and a question above, then press Start research. The agents split it into tracks, read papers for hours and report back here.'));
       }
@@ -172,6 +173,7 @@ export function createResearch() {
     }
     empty.hidden = true; actions.hidden = false; ledeEl.hidden = false;
     const alive = d.daemon && d.daemon.alive;
+    newBtn.hidden = !alive || !!(d.run && d.run.mission); // queued briefs are for a git-driven daemon; app runs start from the taste form
     const st = m.stats || {};
 
     // hero

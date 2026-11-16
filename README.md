@@ -18,6 +18,37 @@ your laptop / phone                     Colab or Kaggle box
                                          └─────────────────────────────────────┘
 ```
 
+## Use it on your own Kaggle (3 steps, nothing to install)
+
+[![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://kaggle.com/kernels/welcome?src=https://github.com/Maverick-Ansh/sabha/blob/main/kaggle/sabha_kaggle.ipynb)
+
+1. Click **Open in Kaggle** above (you need a Kaggle account with a verified phone number, for GPUs and internet).
+   In the notebook's right panel, **Session options**: Accelerator **GPU T4 x2**, Internet **on**.
+2. Run the one cell. About **1 minute** later it prints one link. Open it on your laptop or phone.
+3. The app shows your box coming up in a strip under the top bar. The two models are ready about
+   **15 minutes** after you ran the cell. Then use any tab:
+   - **Research**: write your research taste, papers you love and a question, pick the hours, press **Start research**.
+     The agents split the question into tracks, find and read papers for hours, and judge them by your taste.
+     **Finish now** writes the final reports and synthesis early. **Download results** gives you everything as a zip.
+   - **Talk**: chat with an agent (Lead, Scout, Critic, Builder are made for you).
+   - **Council**: give it an arXiv id; the agents split the paper, discuss it and write a verdict.
+   - **Work**: give an agent a task; it plans, searches the web, runs tools and reports back.
+
+Measured on a fresh Kaggle 2x T4 session: the link in 47 s, the agent tools and vLLM installed in 4 min, model
+downloads under 2 min (while installing), then 10.5 min of model warm-up: about 15 min in all. Qwen3.5-9B (4-bit) on GPU 0 does the deep thinking, Qwen3.5-4B on GPU 1 reads.
+
+Good to know:
+- **Keep the cell running.** It prints a status line every 4 minutes, which stops Kaggle from shutting an idle
+  session. Stopping the cell stops nothing else; run it again to get the link back (`SABHA_NEW_LINK=1` for a new one).
+- **Keep the link private.** It carries the box's token: whoever has it controls the box.
+- **Kaggle limits:** a session ends after 12 hours, and you get about 30 GPU hours a week. Everything on the box is
+  gone when the session ends, so download your research results first (or set a GitHub repo, below).
+- **Better web search:** free search engines answer only a few searches from Kaggle's servers. A free
+  [Tavily](https://tavily.com) key fixes that: paste it in the Research tab, or add a Kaggle Secret `TAVILY_API_KEY`.
+- **Optional Kaggle Secrets:** `TAVILY_API_KEY`, `HF_TOKEN`, and `SABHA_GIT_REPO` (`owner/name`) with
+  `SABHA_GIT_TOKEN` to push research results to your own GitHub repo every 10 minutes.
+- **Colab works too** (one T4, so one model does everything): [colab/sabha_colab.ipynb](colab/sabha_colab.ipynb).
+
 ## The modes
 
 - **Research.** A long-running literature mission on one screen: one tile per research agent, tap for what it
@@ -78,23 +109,15 @@ python -m sabha --demo --no-auth
 Open http://127.0.0.1:8787. Demo mode uses a scripted mock harness and mock models, so
 you can see the whole app move without any model behind it.
 
-## Run it for real on Colab or Kaggle
+## Run it by hand
 
-Open `colab/sabha_colab.ipynb` and run the cells. They clone this repo, install the
-DeepSeek Harness and vLLM, start the hub in the background, and print one link like
-
-```
-https://something.trycloudflare.com/#token=…
-```
-
-Open that link. Then in the app: **Crew → Models → Launch on this box** to start a vLLM
-server for any Hugging Face model (or add the URL of one you already started), and point
-an agent at it.
-
-By hand it is one command:
+The notebook cell runs `python sabha/box.py up` (see the top of `sabha/box.py` for its options): it starts the hub
+with a tunnel, then a detached supervisor installs the tools (`scripts/box_setup.sh`), starts one vLLM server per
+GPU (`sabha/research/serve.sh`), and registers the models and a default crew. `python sabha/box.py status` prints
+the state and the link, `python sabha/box.py stop` stops it all. The hub alone is one command:
 
 ```
-python -m sabha --tunnel cloudflared --data /content/sabha_data
+python -m sabha --tunnel cloudflared --data /kaggle/working/sabha_data
 ```
 
 The token in the link is the only thing protecting a box that can run shell commands.
