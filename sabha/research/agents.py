@@ -555,21 +555,27 @@ questions_for_others: questions this paper raises that another track should answ
             for x in src.repo_urls(u):
                 if x.lower() in full.lower() and x not in in_text:
                     in_text.append(x)
+    # verified = official (the paper links it as its code, or its README names the paper); a repo that only exists is a candidate
+    def _rep(g, how, origin):
+        return {"url": g["url"], "status": how, "license": g.get("license"), "last_push": g.get("last_push"),
+                "stars": g.get("stars"), "src": origin, "why": g.get("why", "")}
     for u in in_text[:4]:
-        g = src.github_repo(u)
-        if g.get("exists"):
-            repo = {"url": g["url"], "status": "verified", "license": g.get("license"), "last_push": g.get("last_push"),
-                    "stars": g.get("stars"), "src": "paper"}
+        g = src.official_repo(u, aid, meta["title"], full)
+        if g.get("official"):
+            repo = _rep(g, "verified", "paper")
             break
-        repo = {**repo, "url": u, "status": "in_paper_unverified", "src": "paper"}
-    if repo["status"] == "not_found" and (reg.get("rel", 0) >= 3 or reg.get("via") == "seed") and budget.take("repo"):
+        if g.get("exists"):
+            if repo["status"] != "candidate":
+                repo = _rep(g, "candidate", "paper")
+        elif repo["status"] == "not_found":
+            repo = {**repo, "url": u, "status": "in_paper_unverified", "src": "paper"}
+    if repo["status"] != "verified" and (reg.get("rel", 0) >= 3 or reg.get("via") == "seed") and budget.take("repo"):
         try:
             for h in src.tavily(f"\"{meta['title'][:120]}\" official code github", 5):
-                for u in src.repo_urls(h["url"] + " " + h["content"]):
-                    g = src.github_repo(u)
-                    if g.get("exists"):
-                        repo = {"url": g["url"], "status": "verified", "license": g.get("license"),
-                                "last_push": g.get("last_push"), "stars": g.get("stars"), "src": "tavily"}
+                for u in src.repo_urls(h["url"] + " " + h["content"])[:3]:
+                    g = src.official_repo(u, aid, meta["title"])
+                    if g.get("official"):
+                        repo = _rep(g, "verified", "tavily")
                         break
                 if repo["status"] == "verified":
                     break

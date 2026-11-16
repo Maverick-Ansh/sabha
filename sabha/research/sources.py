@@ -224,4 +224,41 @@ def github_repo(url: str) -> dict:
     d = json.loads(raw)
     return {"exists": True, "url": d.get("html_url"), "license": (d.get("license") or {}).get("spdx_id"),
             "last_push": (d.get("pushed_at") or "")[:10], "stars": d.get("stargazers_count", 0),
-            "archived": d.get("archived", False)}
+            "archived": d.get("archived", False), "description": d.get("description") or "", "homepage": d.get("homepage") or "",
+            "full_name": d.get("full_name") or f"{o}/{r}", "branch": d.get("default_branch") or "HEAD"}
+
+
+# "our code is available at", "code will be released", "project page": a link the paper gives as ITS OWN code
+CODE_CTX = re.compile(r"\b(our|the|this)\s+(source\s+)?(code|codes|implementation|project|repository)\b|\bcode\s+(is|are|will\s+be|has\s+been)\b"
+                      r"|\bavailable\s+(at|on|from)\b|\bproject\s+page\b|\bopen[- ]?sourced?\b|\breleased?\s+(at|on)\b", re.I)
+
+
+def official_repo(url: str, aid: str, title: str, full: str = "") -> dict:
+    """github_repo() plus 'official': is this THIS paper's code? A repo only exists is not enough
+    (papers link the repos they build on, and search hits carry any GitHub link). Official when the
+    paper links it next to code-availability words, or its README / description / homepage names the
+    arXiv id or the title."""
+    g = github_repo(url)
+    if not g.get("exists"):
+        return g
+    fn = g.get("full_name", "").lower()
+    if full and fn:
+        low = full.lower()
+        for mm in re.finditer(re.escape("github.com/" + fn), low):
+            if CODE_CTX.search(low[max(0, mm.start() - 250):mm.start() + 40]):
+                return {**g, "official": True, "why": "paper links it as its code"}
+    base = re.sub(r"v\d+$", "", aid or "")
+    tnorm = norm(title)[:60]
+    meta = " ".join([g.get("description", ""), g.get("homepage", "")])
+    if (base and base in meta) or (len(tnorm) > 20 and tnorm in norm(meta)):
+        return {**g, "official": True, "why": "repo description names the paper"}
+    for name in ("README.md", "readme.md", "README.rst"):
+        try:
+            raw, _, _ = _get(f"https://raw.githubusercontent.com/{g['full_name']}/{g['branch']}/{name}", "ghraw", 0.3, timeout=20, tries=1)
+        except Exception:
+            continue
+        txt = raw.decode("utf-8", "replace")[:60000]
+        if (base and base in txt) or (len(tnorm) > 20 and tnorm in norm(txt)):
+            return {**g, "official": True, "why": "README names the paper"}
+        break
+    return {**g, "official": False, "why": "exists, but nothing ties it to this paper"}
