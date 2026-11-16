@@ -562,6 +562,8 @@ def register(models: list[dict], token: str) -> bool:
         x = have.get((m["role"], url)) or http_json("POST", hub + "/api/models", {
             "name": m["name"], "kind": "chat", "base_url": url, "served_name": m["role"], "context_window": m["ctx"],
             "extra_body": NO_THINK, "notes": f"{m['hf']} on GPU {m['gpu']}, started by the box launcher"}, token=token)
+        if x.get("context_window") != m["ctx"]:  # registered by an older launcher: the server now has another window
+            x = http_json("PATCH", f"{hub}/api/models/{x['id']}", {"context_window": m["ctx"]}, token=token)
         ids[m["role"]] = x["id"]
     if ids and not state.get("agents"):
         for name, role, want, hue, persona in CREW:
