@@ -30,7 +30,9 @@ your laptop / phone                     Colab or Kaggle box
    - **Research**: write your research taste, papers you love and a question, pick the hours, press **Start research**.
      The agents split the question into tracks, find and read papers for hours, and judge them by your taste.
      **Finish now** writes the final reports and synthesis early. **Download results** gives you everything as a zip.
-   - **Talk**: chat with an agent (Lead, Scout, Critic, Builder are made for you).
+   - **Talk**: think out loud with an agent (Lead, Scout, Critic, Builder are made for you). It remembers everything
+     the box has done (research runs, paper cards, councils, missions, earlier chats) and searches that or the web
+     before it answers; each lookup shows in the reply. Flip the composer to Mission for long work.
    - **Council**: give it an arXiv id; the agents split the paper, discuss it and write a verdict.
    - **Work**: give an agent a task; it plans, searches the web, runs tools and reports back.
 
@@ -56,7 +58,8 @@ Good to know:
 - **Watch.** A live orbit of your agents, a full transcript of every thought, tool call
   and result, and a timeline of the whole 12-hour session you can scrub back through.
   A `raw` switch shows the exact event JSON. Nothing is hidden.
-- **Talk.** Chat with any agent. Flip the composer to *Mission* and the same message
+- **Talk.** Talk with any agent like a colleague. It understands what you want, says a short plan, and looks
+  things up in the box's memory (research, councils, missions, chats) or on the web before it answers. Flip the composer to *Mission* and the same message
   becomes a task. The agent plans, works, and the report lands back in the chat.
 - **Work.** A mission board. Approve or edit a plan before it runs, whisper a note to
   a running agent, stop, resume, and read the files it produced.

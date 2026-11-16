@@ -443,3 +443,26 @@ so a restarted hub finds a run that is still going. The taste reaches the planne
 triage, the reader's gate, every card (`why_it_matters`, shown as "Why it matters to you"), the memory packet of
 every deep step, the track reports and the synthesis. Loved papers are queued first. Git sync runs only when the
 research home is a git checkout: the hub makes it one at Start when a repo and token are set.
+
+## 10. Memory and Talk
+
+`sabha/recall.py` turns everything the box did into one searchable memory: research runs (`research:<mission>`), their
+syntheses, track reports and digests (`synthesis:`, `report:<mission>/<track>`, `digest:`), paper cards
+(`card:<mission>/<arxiv id>`), councils (`council:<id>`), Work missions with their final report and text files
+(`mission:<id>`), earlier Talk chats (`chat:<thread>`) and the research taste (`taste`). Folders listed in
+`SABHA_MEMORY_DIRS` (os.pathsep separated, each holding `missions/`) are searched too, e.g. an older research repo.
+The index is rebuilt whenever something new lands. Search is BM25 over words with a title boost.
+
+| Method | Path | Answer |
+|---|---|---|
+| GET | `/api/memory/search?q=…&kind=card,report&k=8` | `{hits:[{id, kind, title, score, snippet, chars}]}` |
+| GET | `/api/memory/doc?id=…&part=1` | `{id, kind, title, part, parts, text}` (6000 characters a part); 404 for an unknown id |
+
+A Talk reply (real models) gets a system prompt with the agent's name, role and persona, how to talk (understand
+first, say a short plan, then do it; never invent; long work becomes a mission), a catalogue of what the box
+remembers and the owner's taste. Before the model is called, the hub searches memory for the owner's message and
+adds the matching snippets. The request carries four read-only tools: `search_memory {query, kind?}`,
+`read_memory {id, part?}`, `web_search {query}`, `read_page {url, find?}`; up to 6 rounds of tool calls per reply.
+A reply that only announces a lookup is nudged once to make it. A server that refuses `tools` gets plain chat.
+Each lookup is streamed as `chat.delta {message_id, step:{tool, label, result, id?, url?}}` and kept on the final
+message as `steps: [...]`.
