@@ -98,6 +98,7 @@ const ICONS = {
   chat: 'M5 5h14v10H10l-5 4z',
   board: 'M4 5h4v14H4zM10 5h4v9h-4zM16 5h4v6h-4z',
   log: 'M5 6h14M5 10h14M5 14h9M5 18h6',
+  flask: 'M9 3h6M10 3v6.2L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.2V3M7.6 14.5h8.8',
 };
 
 export function icon(name, size = 16, sw = 1.7) {

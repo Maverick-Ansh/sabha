@@ -97,6 +97,14 @@ class Mission:
     def plan(self) -> dict:
         return read_json(self.p("plan.json"), {}) or {}
 
+    @property
+    def taste(self) -> str:
+        """The owner's research taste (taste.md, written when the run starts from the app), cut to prompt size. "" = none."""
+        try:
+            return open(self.p("taste.md"), encoding="utf-8").read().strip()[:1500]
+        except OSError:
+            return ""
+
     def track_ids(self) -> list[str]:
         return [t["id"] for t in self.plan.get("tracks", [])]
 
@@ -198,6 +206,14 @@ def packet(m: Mission, tid: str, near_claims: list[dict] | None = None, steering
     parts = [f"MISSION: {m.plan.get('one_line', '')}",
              f"YOUR TRACK {tid}: {t.get('name', '')}. {t.get('one_line', '')}",
              "TRACK QUESTIONS:\n" + "\n".join(f"- {q['id']}: {q['text']}" for q in t.get("questions", []))]
+    if m.taste:  # early in the packet, so the cut at max_chars never drops it
+        parts.append("THE OWNER'S RESEARCH TASTE (choose, judge and write by it):\n" + m.taste)
+    # standing instructions sent from the phone (research/inbox.py); early in the packet, so the cut at max_chars never drops them
+    dj = read_json(m.p("state", "directives.json"), {})
+    human = [x.get("text", "") for x in ((dj.get("instructions") or []) if isinstance(dj, dict) else [])
+             if isinstance(x, dict) and x.get("track") in (tid, "all") and x.get("text")][-8:]
+    if human:
+        parts.append("STANDING INSTRUCTIONS FROM THE HUMAN (they apply to everything you do in this step):\n" + "\n".join(f"- {s}" for s in human))
     dig = ""
     try:
         dig = open(m.p("tracks", tid, "digest.md"), encoding="utf-8").read()[:2500]

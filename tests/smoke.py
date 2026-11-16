@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import zipfile
+import io
 import os
 import shutil
 import socket
@@ -687,6 +689,74 @@ async def main() -> int:
         await ws.close()
         pump.cancel()
         ws = None
+        # ---------------- box: boot strip, settings, taste, research runs started from the app (mock daemon in demo)
+        st, b = await api.call("GET", "/api/boot")
+        check("boot: no launcher -> present false, ready", st == 200 and b["present"] is False and b["ready"] is True, str(b)[:200])
+        (data_dir / "boot.json").write_text(json.dumps({"epoch": time.time(), "ready": False, "stage": "models", "gpus": [{"index": 0}],
+                                                       "steps": [{"id": "tools", "status": "done"},
+                                                                 {"id": "model:reader", "status": "starting", "secs": 60, "expect_s": 600}]}),
+                                            encoding="utf-8")
+        st, b = await api.call("GET", "/api/boot")
+        check("boot: launcher file is served", st == 200 and b["present"] and not b["ready"] and b["alive"] and len(b["steps"]) == 2, str(b)[:200])
+        st, s = await api.call("GET", "/api/settings")
+        check("settings: no keys", st == 200 and s["tavily_key"]["set"] is False and s["git_sync"] is False, str(s)[:200])
+        st, s = await api.call("PUT", "/api/settings", {"tavily_key": "tvly-abcdefghijkl1234"})
+        check("settings: key stored, only a hint comes back", st == 200 and s["tavily_key"]["set"] and s["tavily_key"]["hint"].endswith("1234")
+              and "abcdefghijkl" not in json.dumps(s), str(s)[:200])
+        check("settings: key reaches the environment", os.environ.get("TAVILY_API_KEY") == "tvly-abcdefghijkl1234")
+        st, s = await api.call("PUT", "/api/settings", {"tavily_key": ""})
+        check("settings: key cleared", st == 200 and s["tavily_key"]["set"] is False and "TAVILY_API_KEY" not in os.environ, str(s)[:200])
+        st, s = await api.call("PUT", "/api/settings", {"git_repo": "not a repo"})
+        check("settings: bad git_repo -> 400", st == 400, str(s)[:200])
+        st, t = await api.call("PUT", "/api/taste", {"taste": "I trust ablations over leaderboards. Skip surveys.",
+                                                    "loves": "https://arxiv.org/abs/2301.08243v2\nA paper title I like",
+                                                    "topic": "Which world models help planning?", "hours": 0.5})
+        check("taste: saved, arXiv id pulled out of a link", st == 200 and t["loves"] == ["2301.08243", "A paper title I like"]
+              and t["hours"] == 0.5, str(t)[:200])
+        st, t = await api.call("GET", "/api/taste")
+        check("taste: survives a reload", st == 200 and t["taste"].startswith("I trust"), str(t)[:200])
+        st, r = await api.call("POST", "/api/research/start", {"topic": "short"})
+        check("research: a too-short question -> 400", st == 400, str(r)[:200])
+        st, r = await api.call("POST", "/api/research/start", {"topic": "Which world models actually help a policy plan?"})
+        check("research: start (mock daemon)", st == 200 and r["running"] and r["mock"] and r["mission"], str(r)[:300])
+        rmid = r.get("mission", "") if isinstance(r, dict) else ""
+        st, _ = await api.call("POST", "/api/research/start", {})
+        check("research: one run at a time -> 409", st == 409)
+        mroot = data_dir / "research" / "missions" / rmid
+        check("research: brief carries the taste and the question", (mroot / "brief.md").is_file()
+              and "I trust ablations" in (mroot / "brief.md").read_text("utf-8") and (mroot / "taste.md").is_file()
+              and json.loads((mroot / "loves.json").read_text("utf-8")) == ["2301.08243"])
+        ov = {}
+        for _ in range(60):
+            st, ov = await api.call("GET", "/api/research")
+            if st == 200 and ((ov.get("mission") or {}).get("stats") or {}).get("cards", 0) >= 2:
+                break
+            await asyncio.sleep(0.5)
+        check("research: overview shows the run and live cards", (ov.get("run") or {}).get("running")
+              and (ov.get("mission") or {}).get("id") == rmid and ov["mission"]["stats"]["cards"] >= 2
+              and len(ov.get("agents") or []) == 2, str(ov.get("run"))[:300])
+        st, r = await api.call("POST", "/api/research/stop", {"mode": "finish"})
+        check("research: finish accepted", st == 200 and r["finishing"], str(r)[:200])
+        for _ in range(40):
+            st, r = await api.call("GET", "/api/research")
+            if not r["run"]["running"]:
+                break
+            await asyncio.sleep(0.5)
+        check("research: daemon ends after finish", not r["run"]["running"] and r["run"]["ended"], str(r["run"])[:300])
+        check("research: synthesis written", (mroot / "synthesis.md").is_file())
+        async with http.get(f"{base}/api/research/export/{rmid}?token={TOKEN}") as resp:
+            blob = await resp.read()
+            zip_ok = resp.status == 200 and resp.content_type == "application/zip"
+        names = zipfile.ZipFile(io.BytesIO(blob)).namelist() if zip_ok else []
+        check("research: export zip has taste, cards, synthesis", zip_ok and f"{rmid}/synthesis.md" in names
+              and f"{rmid}/taste.md" in names and any(n.startswith(f"{rmid}/cards/") for n in names), str(names[:8]))
+        st, _ = await api.call("GET", "/api/research/export/no-such-mission")
+        check("research: export of an unknown mission -> 404", st == 404)
+        st, r = await api.call("POST", "/api/research/start", {"topic": "A second question about planning with models?", "hours": 0.5})
+        check("research: a second run starts after the first ended", st == 200 and r["running"], str(r)[:200])
+        st, r = await api.call("POST", "/api/research/stop", {"mode": "now"})
+        check("research: stop now", st == 200 and not r["running"] and r["how"] == "stopped from the app", str(r)[:200])
+
         await runner.cleanup()
         runner = None
         state_file = data_dir / "state.json"

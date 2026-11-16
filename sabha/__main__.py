@@ -2,6 +2,7 @@
 
     python -m sabha [--host 127.0.0.1] [--port 8787] [--data ./sabha_data] [--token T]
                     [--no-auth] [--demo] [--tunnel none|cloudflared|ngrok] [--session-hours 12]
+                    [--research-repo DIR] [--model NAME=URL ...] [--no-think]
 
 It starts the aiohttp server, optionally opens a tunnel, prints one link with
 the token in the URL hash, and on Ctrl+C / SIGTERM stops every child process
@@ -42,6 +43,13 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="publish the hub through a tunnel")
     p.add_argument("--session-hours", type=float, default=12.0,
                    help="how long the box lives, for the UI's countdown (default 12)")
+    p.add_argument("--research-repo", default=os.environ.get("SABHA_RESEARCH_REPO", ""),
+                   help="data repo of the research daemon, for the Research view (default: env SABHA_RESEARCH_REPO)")
+    p.add_argument("--model", action="append", default=[], metavar="NAME=URL",
+                   help="register an OpenAI-compatible server that is already running, for example "
+                        "reader=http://127.0.0.1:8002/v1 (NAME is also the served name; repeatable; skipped if NAME exists)")
+    p.add_argument("--no-think", action="store_true",
+                   help="models added with --model get chat_template_kwargs.enable_thinking=false on every request")
     p.add_argument("--log-level", default="INFO", help="logging level (default INFO)")
     args = p.parse_args(argv)
     if args.no_auth and args.host not in LOOPBACK:
@@ -50,6 +58,10 @@ def parse_args(argv=None) -> argparse.Namespace:
         p.error("--no-auth cannot be combined with a tunnel: the link would be public with no token")
     if not 0 < args.port < 65536:
         p.error("--port must be between 1 and 65535")
+    for spec in args.model:
+        name, _, url = spec.partition("=")
+        if not name.strip() or not url.strip().startswith(("http://", "https://")):
+            p.error(f"--model takes NAME=URL with an http(s) URL, got {spec!r}")
     return args
 
 
@@ -69,7 +81,22 @@ def _bind(host: str, port: int) -> socket.socket:
     return socket.create_server((host, port), family=family, backlog=128)
 
 
-async def serve(cfg: Config, tunnel_kind: str) -> int:
+def _register_models(hub: Hub, specs: list[str], no_think: bool) -> None:
+    """--model NAME=URL: add servers that already run on the box as plain base_url models, once."""
+    have = {m.get("name") for m in hub.store.models.values()}
+    for spec in specs:
+        name, _, url = spec.partition("=")
+        name, url = name.strip(), url.strip()
+        if name in have:
+            continue
+        body = {"name": name, "kind": "chat", "base_url": url, "served_name": name, "notes": "added with --model"}
+        if no_think:
+            body["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        hub.models.create(body)
+        have.add(name)
+
+
+async def serve(cfg: Config, tunnel_kind: str, models: list[str] | None = None, no_think: bool = False) -> int:
     try:
         sock = _bind(cfg.host, cfg.port)
     except OSError as e:
@@ -85,6 +112,7 @@ async def serve(cfg: Config, tunnel_kind: str) -> int:
     runner = web.AppRunner(app, access_log=None, handle_signals=False)
     await runner.setup()  # runs startup: recovery, demo seed, demo missions
     await web.SockSite(runner, sock).start()
+    _register_models(hub, models or [], no_think)
 
     local_host = "127.0.0.1" if cfg.host in ("0.0.0.0", "::", "") else cfg.host
     suffix = "" if cfg.no_auth else f"/#token={cfg.token}"
@@ -104,6 +132,8 @@ async def serve(cfg: Config, tunnel_kind: str) -> int:
         f"data:   {cfg.data_dir}",
         f"local:  {local_link}",
     ]
+    if cfg.research_repo:
+        info.append(f"research: {cfg.research_repo}" + ("" if hub.research.available() else "  (no missions/ folder there yet)"))
     if public_link:
         info.append(f"public: {public_link}")
     if not cfg.no_auth:
@@ -141,9 +171,10 @@ def main(argv=None) -> int:
     data = Path(args.data or ("./sabha_data_demo" if args.demo else "./sabha_data")).expanduser().resolve()
     token = args.token or os.environ.get("SABHA_TOKEN") or secrets.token_urlsafe(18)
     cfg = Config(host=args.host, port=args.port, data_dir=data, token=token, no_auth=args.no_auth,
-                 demo=args.demo, session_hours=args.session_hours)
+                 demo=args.demo, session_hours=args.session_hours,
+                 research_repo=str(Path(args.research_repo).expanduser().resolve()) if args.research_repo else "")
     try:
-        return asyncio.run(serve(cfg, args.tunnel))
+        return asyncio.run(serve(cfg, args.tunnel, args.model, args.no_think))
     except KeyboardInterrupt:
         return 0
 

@@ -28,6 +28,9 @@ from .harness import NAMES as HARNESSES
 from .harness.dsh import dsh_path
 from .missions import MissionManager
 from .models import ModelManager
+from .research_api import Research, add_routes as add_research_routes
+from .research_run import Runner, read_boot
+from .settings import Settings, Taste
 from .store import Store
 from .talk import TalkManager, thread_public
 from .telemetry import Telemetry, detect_platform
@@ -63,6 +66,7 @@ class Config:
     demo: bool = False
     session_hours: float = 12.0
     web_dir: Path = WEB_DIR
+    research_repo: str = ""  # data repo of the research daemon (missions/<id>/...); "" = no Research view data
 
 
 class Hub:
@@ -82,6 +86,13 @@ class Hub:
         self.missions = MissionManager(self)
         self.councils = CouncilManager(self)
         self.telemetry = Telemetry(self)
+        if not cfg.research_repo:  # runs started from the app live here; --research-repo points at a git-driven data repo instead
+            cfg.research_repo = str(Path(cfg.data_dir) / "research")
+        os.makedirs(os.path.join(cfg.research_repo, "missions"), exist_ok=True)
+        self.settings = Settings(cfg.data_dir)  # also puts a saved Tavily key into the environment
+        self.taste = Taste(cfg.data_dir)
+        self.research = Research(self)
+        self.runner = Runner(self, cfg.research_repo)
         self.sockets: set[web.WebSocketResponse] = set()
 
     async def start(self) -> None:
@@ -116,6 +127,7 @@ class Hub:
                 "session_limit_s": self.session_limit_s,
                 "data_dir": str(self.cfg.data_dir),
                 "harnesses": {"dsh": dsh_path() is not None, "mock": True, "chat": True},
+                "research": self.research.available(),
             },
             "models": list(self.store.models.values()),
             "agents": list(self.store.agents.values()),
@@ -285,6 +297,43 @@ async def auth_middleware(request: web.Request, handler):
 
 async def get_state(request):
     return web.json_response(_hub(request).snapshot())
+
+
+# ---- box boot strip, settings, research taste and runs started from the app (PROTOCOL.md sections 8 and 9)
+
+async def get_boot(request):
+    return web.json_response(await asyncio.to_thread(read_boot, _hub(request).cfg.data_dir))
+
+
+async def get_settings(request):
+    return web.json_response(_hub(request).settings.public())
+
+
+async def put_settings(request):
+    return web.json_response(_hub(request).settings.update(await _body(request)))
+
+
+async def get_taste(request):
+    return web.json_response(_hub(request).taste.load())
+
+
+async def put_taste(request):
+    return web.json_response(_hub(request).taste.save(await _body(request)))
+
+
+async def research_start(request):
+    return web.json_response(await asyncio.to_thread(_hub(request).runner.start, await _body(request)))
+
+
+async def research_stop(request):
+    body = await _body(request)
+    return web.json_response(await asyncio.to_thread(_hub(request).runner.stop, str(body.get("mode") or "now")))
+
+
+async def research_export(request):
+    name, blob = await asyncio.to_thread(_hub(request).runner.export, request.match_info["mid"])
+    return web.Response(body=blob, content_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 async def create_model(request):
@@ -611,6 +660,15 @@ def create_app(hub: Hub) -> web.Application:
     r.add_delete("/api/councils/{id}", delete_council)
     r.add_get("/api/councils/{id}/section", council_section)
     r.add_get("/api/events", all_events)
+    add_research_routes(r, _hub, _body)
+    r.add_get("/api/boot", get_boot)
+    r.add_get("/api/settings", get_settings)
+    r.add_put("/api/settings", put_settings)
+    r.add_get("/api/taste", get_taste)
+    r.add_put("/api/taste", put_taste)
+    r.add_post("/api/research/start", research_start)
+    r.add_post("/api/research/stop", research_stop)
+    r.add_get("/api/research/export/{mid}", research_export)
     r.add_get("/ws", ws_handler)
     r.add_get("/{tail:.*}", static_handler)
 

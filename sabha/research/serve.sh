@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Keep one vLLM server alive: launch, probe /v1/models every 30 s, relaunch on death or 3 missed probes.
 # usage: serve.sh NAME GPU PORT MODEL UTIL MAXLEN MAXSEQS
-# Run it detached (setsid). Logs: /kaggle/working/logs/NAME.vllm.log
+# Run it detached (setsid). Logs: $SABHA_LOGS/NAME.vllm.log (default /kaggle/working/logs)
 if [ "$1" = stop ]; then  # serve.sh stop NAME: kill the server's whole process group (EngineCore children too)
   P=$(cat "/tmp/serve_$2.pid" 2>/dev/null); [ -n "$P" ] && kill -9 -- -"$P" 2>/dev/null; rm -f "/tmp/serve_$2.pid" "/tmp/serve_$2.health"; exit 0
 fi
 NAME=$1; GPU=$2; PORT=$3; MODEL=$4; UTIL=$5; MAXLEN=$6; SEQS=$7
-LOG=/kaggle/working/logs/$NAME.vllm.log
+LOGDIR=${SABHA_LOGS:-/kaggle/working/logs}; mkdir -p "$LOGDIR"; LOG=$LOGDIR/$NAME.vllm.log
+TOOLP=${SABHA_TOOL_PARSER-qwen3_xml}  # Qwen3.5 tool calls (Work mode / dsh); with hermes they vanish silently. Empty = off
+TOOLARGS=(); [ -n "$TOOLP" ] && TOOLARGS=(--enable-auto-tool-choice --tool-call-parser "$TOOLP")
 VLLM=${VLLM:-/opt/vllm/bin/vllm}
 say() { echo "[serve $NAME $(date +%H:%M:%S)] $*"; }
 while true; do
@@ -15,7 +17,7 @@ while true; do
   CUDA_VISIBLE_DEVICES=$GPU VLLM_ATTENTION_BACKEND=TRITON_ATTN setsid "$VLLM" serve "$MODEL" \
     --served-model-name "$NAME" --port "$PORT" --dtype float16 --max-num-seqs "$SEQS" \
     --max-model-len "$MAXLEN" --gpu-memory-utilization "$UTIL" --enable-prefix-caching \
-    --reasoning-parser qwen3 --limit-mm-per-prompt '{"image":0,"video":0}' >>"$LOG" 2>&1 &
+    --reasoning-parser qwen3 "${TOOLARGS[@]}" --limit-mm-per-prompt '{"image":0,"video":0}' >>"$LOG" 2>&1 &
   PID=$!
   echo "$PID" > "/tmp/serve_$NAME.pid"
   up=0; miss=0; t0=$(date +%s)

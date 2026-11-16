@@ -20,7 +20,7 @@ import threading
 import time
 import traceback
 
-from . import agents as A, llm, sources as src
+from . import agents as A, inbox, live, llm, sources as src
 from .index import Index
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
@@ -34,10 +34,19 @@ def sh(cmd: str, cwd: str, timeout: int = 120) -> tuple[int, str]:
         return 124, "timeout"
 
 
+def margins(total_s: float) -> dict:
+    """Seconds before the deadline at which each phase ends. 12 h runs keep the measured values; short runs scale down."""
+    def m(minutes: float, frac: float) -> float:
+        return min(minutes * 60, frac * max(total_s, 600))
+    return {"scout": m(75, .35), "reports": m(60, .30), "work": m(45, .22), "synth": m(40, .18), "loop": m(15, .07), "end": m(12, .05)}
+
+
 class Daemon:
-    def __init__(self, repo: str, until: float, slots: int = 6):
+    def __init__(self, repo: str, until: float, slots: int = 6, mission_id: str = "", once: bool = False):
         self.repo, self.until, self.slots = repo, until, slots
+        self.mission_id, self.once = mission_id, once
         self.t_start = time.time()
+        self.M = margins(until - self.t_start)
         self.stop = False
         self.m: Mission | None = None
         self.idx = Index("cpu")
@@ -54,13 +63,14 @@ class Daemon:
         self.synth_final_done = False
         self.final_reports_done = False
         self.restart = False
-        if os.environ.get("SABHA_S1"):  # e.g. SABHA_S1=reader: System-1 triage served by the 4B (no room for a 0.8B server)
-            llm.OVERRIDE["s1"] = os.environ["SABHA_S1"]
+        for role in ("s1", "deep", "reader"):  # e.g. SABHA_S1=reader (no 0.8B server), SABHA_DEEP=reader (one-GPU box)
+            if os.environ.get(f"SABHA_{role.upper()}"):
+                llm.OVERRIDE[role] = os.environ[f"SABHA_{role.upper()}"]
 
     # ------------------------------------------------------------ mission selection
     def pick_mission(self) -> Mission | None:
         best = None
-        for b in sorted(glob.glob(os.path.join(self.repo, "missions", "*", "brief.md"))):
+        for b in sorted(glob.glob(os.path.join(self.repo, "missions", self.mission_id or "*", "brief.md"))):
             root = os.path.dirname(b)
             st = read_json(os.path.join(root, "state", "mission.json"), {}) or {}
             if st.get("status") == "done":
@@ -70,6 +80,20 @@ class Daemon:
             if best is None or (pre and not best[1]):
                 best = (root, pre)
         return Mission(best[0]) if best else None
+
+    def queue_loved(self, m: Mission) -> None:
+        loved = read_json(m.p("loves.json"), []) or []
+        tids = m.track_ids()
+        for aid in loved if tids else []:
+            if isinstance(aid, str) and aid not in m.reg:
+                m.mark(aid, state="queued", track=tids[0], rel=3, prio=3, via="seed", seed="loved by the owner")
+        if loved:
+            print(f"[run] {len(loved)} loved papers queued first", flush=True)
+
+    def finish(self) -> str:
+        """The app's Finish now: final reports and the synthesis from what is in hand, then the run ends."""
+        self.until = min(self.until, time.time() + self.M["synth"] + 120)
+        return "finishing: final reports and synthesis now, then the run ends"
 
     def set_status(self, status: str) -> None:
         p = self.m.p("state", "mission.json")
@@ -99,15 +123,16 @@ class Daemon:
                     aid = q[0]["id"]
                     self.m.mark(aid, state="reading")
                     return aid
-            q = self.m.queued()
+            q = [r for r in self.m.queued() if w.get(r.get("track"), 1.0) > 0]  # a paused track (weight 0) stays paused
             if q:
                 self.m.mark(q[0]["id"], state="reading")
                 return q[0]["id"]
         return None
 
     def worker(self, k: int) -> None:
+        live.slot(f"w{k}", "worker")
         while not self.stop:
-            if time.time() > self.until - 45 * 60:
+            if time.time() > self.until - self.M["work"]:
                 return
             aid = self.next_paper()
             if not aid:
@@ -115,6 +140,7 @@ class Daemon:
                 continue
             try:
                 reg = self.m.reg.get(aid, {})
+                live.begin(step="fetch", paper=aid, title=reg.get("title") or "", track=reg.get("track"))
                 res = A.read_paper(self.m, aid, self.idx, self.budget, self.steer, max_chunks=int(self.params["max_chunks"]),
                                    tier_b=reg.get("via") == "seed")
                 if res == "carded":
@@ -125,6 +151,8 @@ class Daemon:
             except Exception as e:
                 self.err(f"worker {k} {aid}: {type(e).__name__}: {str(e)[:200]}")
                 self.m.mark(aid, state="failed", why=f"crash: {str(e)[:150]}")
+            finally:
+                live.idle()
 
     def err(self, msg: str) -> None:
         self.errors = (self.errors + [f"{time.strftime('%H:%M')} {msg}"])[-20:]
@@ -134,19 +162,23 @@ class Daemon:
     # ------------------------------------------------------------ maintenance (deep-model jobs, one at a time)
     def maintenance(self) -> None:
         m = self.m
+        live.slot("maint", "maintenance")
         if not os.path.exists(m.p("memory/seeds.json")):
             def seeds():
+                live.slot("seeds", "seeds")
                 try:
                     A.resolve_seeds(m, self.idx, self.budget)
                 except Exception as e:
                     self.err(f"seeds: {e}")
                     traceback.print_exc()
+                finally:
+                    live.idle()
             threading.Thread(target=seeds, daemon=True).start()  # scouting starts at once, seeds resolve beside it
         while not self.stop:
             left = self.until - time.time()
             try:
                 did = False
-                if left > 75 * 60:
+                if left > self.M["scout"]:
                     for tid in m.track_ids():
                         ts = self.track_state.setdefault(tid, {})
                         if ts.get("saturated") or self.weights().get(tid, 1) <= 0:
@@ -171,7 +203,7 @@ class Daemon:
                         A.rebuild_playbook(m, self.steer.get("lessons", []))
                         ts["last_cons"] = time.time()
                         did = True
-                if left > 60 * 60:
+                if left > self.M["reports"]:
                     for tid in m.track_ids():
                         ts = self.track_state.setdefault(tid, {})
                         due = ts.get("cards_since_report", 0) >= self.params["report_every_cards"] or (
@@ -182,41 +214,46 @@ class Daemon:
                             ts["last_report"] = time.time()
                             did = True
                 half = self.t_start + (self.until - self.t_start) / 2
-                if not self.synth_draft_done and time.time() > half:
+                if not self.synth_draft_done and time.time() > half and self.until - self.t_start >= 3 * 3600:
                     A.write_synthesis(m, final=False)
                     self.synth_draft_done = True
-                if not self.final_reports_done and left < 60 * 60:
+                if not self.final_reports_done and left < self.M["reports"]:
                     for tid in m.track_ids():
                         A.write_report(m, tid)
                     self.final_reports_done = True
-                if not self.synth_final_done and left < 40 * 60:
+                if not self.synth_final_done and left < self.M["synth"]:
                     A.write_synthesis(m, final=True)
                     self.synth_final_done = True
                     self.set_status("done")
                     self.sync("mission done")
                     self.stop = True
                 if not did:
+                    live.idle()
                     time.sleep(30)
             except Exception as e:
                 self.err(f"maintenance: {type(e).__name__}: {str(e)[:200]}")
                 traceback.print_exc()
+                live.idle()
                 time.sleep(60)
 
     # ------------------------------------------------------------ git, steering, status, digest
     def sync(self, why: str = "sync") -> bool:
+        if not os.path.isdir(os.path.join(self.repo, ".git")):
+            return True
+        tok = os.environ.get("SABHA_GIT_TOKEN") or ""
         with self.git_lock:
             cwd = self.repo
             sh("git add -A", cwd)
             rc, out = sh(f'git commit -qm "box: {why} {now()}"', cwd)
             rc, out = sh("git fetch -q origin && git merge -q --no-edit origin/main", cwd)
             if rc != 0:
-                self.err(f"git merge: {out[-200:]}")
+                self.err("git merge: " + (out[-200:].replace(tok, "***") if tok else out[-200:]))
                 sh("git merge --abort", cwd)
             rc, out = sh("git push -q origin HEAD:main", cwd, timeout=180)
             if rc == 0:
                 self.last_push_ok = time.time()
                 return True
-            self.err(f"git push: {out[-200:]}")
+            self.err("git push: " + (out[-200:].replace(tok, "***") if tok else out[-200:]))
             return False
 
     def standing_steering(self) -> None:
@@ -363,6 +400,7 @@ class Daemon:
         L += ["", "## Recent errors"] + [f"- {x}" for x in self.errors[-8:]]
         sa = read_json(m.p("state", "steering_applied.json"), {}) or {}
         L += ["", f"## Steering applied: seq {sa.get('seq', 0)}"] + [f"- {x}" for x in sa.get("items", [])]
+        L += inbox.status_lines(m)
         write(m.p("STATUS.md"), "\n".join(L) + "\n")
 
     def digest(self) -> None:
@@ -432,6 +470,8 @@ class Daemon:
     def housekeeping(self) -> None:
         while not self.stop:
             t = time.time()
+            if inbox.poll(self):  # commands from the phone, every pass (~15 s); STATUS shows the result at once
+                self.last["status"] = 0
             try:
                 if t - self.last["index"] > 600:
                     n = self.idx.refresh()
@@ -459,8 +499,11 @@ class Daemon:
     def run(self) -> None:
         print(f"[run] start, until {time.strftime('%H:%M', time.gmtime(self.until))} UTC", flush=True)
         self.idx.refresh()
-        while time.time() < self.until - 15 * 60:
+        while time.time() < self.until - self.M["loop"]:
             self.m = self.pick_mission()
+            if not self.m and self.once:
+                print("[run] no open mission left (--once): exit", flush=True)
+                return 0
             if not self.m:
                 time.sleep(60)
                 continue
@@ -468,8 +511,20 @@ class Daemon:
             m = self.m
             self.budget = src.Budget(m.p("state", "budget.json"), cap=int(self.params["tavily_cap"]))
             if not m.plan.get("tracks"):
-                A.plan_mission(m)
+                try:
+                    A.plan_mission(m)
+                except Exception as e:  # a brief the planner cannot turn into tracks (sent from the phone) must not stop the daemon
+                    print(f"[run] mission {m.id}: planning failed, mission skipped: {type(e).__name__}: {str(e)[:200]}", flush=True)
+                    write_json(m.p("state", "mission.json"), {"status": "done", "error": f"planning failed: {str(e)[:300]}", "ts": now()})
+                    continue
+            if getattr(self, "_last_mid", m.id) != m.id:  # a switch inside one process (phone command: mission, mode preempt)
+                self.track_state, self.deficit, self.t_start = {}, {}, time.time()  # per-track state belonged to the old mission
+                self.synth_draft_done = self.synth_final_done = self.final_reports_done = False
+            self._last_mid = m.id
+            self.queue_loved(m)
             self.set_status("running")
+            live.bind(m.p("state", "live.json"), m.id)
+            inbox.restore(self)
             self.standing_steering()
             A.rebuild_playbook(m, self.steer.get("lessons", []))
             n = m.requeue_stale(0)
@@ -483,17 +538,22 @@ class Daemon:
             threads += [threading.Thread(target=self.worker, args=(k,), daemon=True) for k in range(self.slots)]
             for th in threads:
                 th.start()
-            while not self.stop and time.time() < self.until - 12 * 60:
+            while not self.stop and time.time() < self.until - self.M["end"]:
                 time.sleep(20)
             self.stop = True
             for th in threads:
                 th.join(timeout=600)
             self.status()
             self.digest()
-            self.sync("final" if time.time() > self.until - 15 * 60 else "mission switch")
+            self.sync("final" if time.time() > self.until - self.M["loop"] else "mission switch")
             if self.restart:
                 print("[run] restart requested by steering", flush=True)
                 return 3
+            if self.once:
+                if read_json(m.p("state", "mission.json"), {}).get("status") != "done":
+                    self.set_status("done")
+                print(f"[run] mission {m.id} ended (--once): exit", flush=True)
+                return 0
         print("[run] deadline reached", flush=True)
         return 0
 
@@ -521,9 +581,11 @@ def main() -> None:
     ap.add_argument("--hours", type=float, default=11.5)
     ap.add_argument("--slots", type=int, default=6)
     ap.add_argument("--test-paper", default="")
+    ap.add_argument("--mission", default="", help="work on this mission id only")
+    ap.add_argument("--once", action="store_true", help="exit when the mission ends instead of waiting for the next one")
     a = ap.parse_args()
     until = a.until or time.time() + a.hours * 3600
-    d = Daemon(a.repo, until, a.slots)
+    d = Daemon(a.repo, until, a.slots, a.mission, a.once)
     if a.test_paper:
         d.m = d.pick_mission()
         d.budget = src.Budget(d.m.p("state", "budget.json"))

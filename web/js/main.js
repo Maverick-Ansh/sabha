@@ -9,6 +9,8 @@ import { createWatch } from './watch.js';
 import { createTalk } from './talk.js';
 import { createWork } from './work.js';
 import { createCouncil } from './council.js';
+import { createResearch, researchAvailable } from './research.js';
+import { createBoot } from './boot.js';
 import { openDrawer } from './drawer.js';
 import { openCrew } from './crew.js';
 import { openPalette } from './palette.js';
@@ -19,10 +21,11 @@ const root = document.getElementById('app');
 let helloHead = 0, helloSeen = false, pongSeen = false, conn = null, gateEl = null, mode = null;
 
 // ---------- views ----------
-const views = { watch: createWatch(), talk: createTalk(), work: createWork(), council: createCouncil() };
+const views = { research: createResearch(), watch: createWatch(), talk: createTalk(), work: createWork(), council: createCouncil() };
 const topbar = createTopbar({ onMode: (m) => setMode(m), onCrew: () => openCrew(), onPalette: () => openPalette() });
 const viewsEl = h('main.views', null, Object.values(views).map((v) => v.el));
-root.append(topbar.el, viewsEl);
+const bootStrip = createBoot();
+root.append(topbar.el, bootStrip.el, viewsEl, topbar.tabbar);
 for (const [k, v] of Object.entries(views)) { v.el.hidden = true; v.el.dataset.view = k; }
 
 function setMode(next) {
@@ -45,7 +48,7 @@ function setMode(next) {
   inEl.classList.remove('entering'); void inEl.offsetWidth; inEl.classList.add('entering');
   views[mode].setActive(true);
 }
-const modeFromHash = () => { const m = location.hash.match(/^#\/(watch|talk|work|council)\b/); return m ? m[1] : null; };
+const modeFromHash = () => { const m = location.hash.match(/^#\/(research|watch|talk|work|council)\b/); return m ? m[1] : null; };
 addEventListener('hashchange', () => { const m = modeFromHash(); if (m) setMode(m); });
 
 nav.go = setMode;
@@ -64,8 +67,8 @@ const typing = (t) => t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.t
 addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
   if (typing(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (document.querySelector('.modal, .drawer, .slideover')) return;
-  const i = ['1', '2', '3', '4'].indexOf(e.key);
+  if (document.querySelector('.modal, .drawer, .slideover, .r-sheet')) return;
+  const i = ['1', '2', '3', '4', '5'].indexOf(e.key);
   if (i >= 0) { e.preventDefault(); setMode(MODES[i]); }
 });
 
@@ -89,6 +92,7 @@ function showGate() {
         const snap = await get('/api/state');
         store.reset(snap);
         gateEl.remove(); gateEl = null;
+        preferResearch();
         if (conn) conn.reconnect(); else startSocket();
       } catch (ex) {
         err.textContent = ex.status === 401 ? 'That key did not open the door. Check the link the hub printed.' : `The hub did not answer: ${ex.message}`;
@@ -125,16 +129,27 @@ function startSocket() {
 }
 
 // ---------- boot ----------
+// Research is the first view whenever the hub has a research mission, unless the link named a view.
+let routed = false;
+async function preferResearch() {
+  const has = await researchAvailable();
+  try { localStorage.setItem('sabha.research', has ? '1' : '0'); } catch { /* ignore */ }
+  if (has && !routed) { routed = true; setMode('research'); }
+  else if (!has && !routed && mode === 'research') setMode('watch');
+}
 async function boot() {
   initToken();
   setUnauthorizedHandler(showGate);
   initNotify();
   let initial = modeFromHash();
-  if (!initial) { try { initial = localStorage.getItem('sabha.mode'); } catch { /* ignore */ } }
+  routed = !!initial;
+  if (!initial) { try { initial = localStorage.getItem('sabha.research') === '1' ? 'research' : localStorage.getItem('sabha.mode'); } catch { /* ignore */ } }
   setMode(initial || 'watch');
   try {
     const snap = await get('/api/state');
     store.reset(snap);
+    preferResearch();
+    bootStrip.start();
   } catch (e) {
     if (e.status === 401) { showGate(); return; }
     store.setConn('reconnecting');

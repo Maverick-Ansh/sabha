@@ -18,8 +18,10 @@ your laptop / phone                     Colab or Kaggle box
                                          └─────────────────────────────────────┘
 ```
 
-## Four modes
+## The modes
 
+- **Research.** A long-running literature mission on one screen: one tile per research agent, tap for what it
+  is doing and a summary, instruct it from your phone. See "Research on your phone" below.
 - **Watch.** A live orbit of your agents, a full transcript of every thought, tool call
   and result, and a timeline of the whole 12-hour session you can scrub back through.
   A `raw` switch shows the exact event JSON. Nothing is hidden.
@@ -31,6 +33,40 @@ your laptop / phone                     Colab or Kaggle box
   gives each agent one part. They write briefs at the same time, discuss for a few rounds,
   look things up on the web when a point needs it, and the chair writes a verdict. You can
   speak at any time. A message after the verdict starts one more round.
+
+## Research on your phone
+
+The research daemon (`python -m sabha.research.run`, see `docs/RESEARCH_PLAN.md`) reads papers for hours on its
+own. The **Research** view is its remote control, built for a phone first. It is the first screen whenever the hub
+has a research mission.
+
+- One tile per agent (a track of the mission): what it is doing right now, with a pulse while it works, its card
+  count and the paper in hand.
+- Tap a tile for a sheet: now doing with the step it is on, a summary on request (one call to the small reader
+  model), its recent paper cards (tap one to read it), its report and digest, what it did lately.
+- Give instructions from the sheet. An **instruction** stays in force and joins everything that agent reads,
+  searches and writes. A **priority topic** steers its next searches. **Clear context** drops its instructions and
+  topics, rebuilds its digest from the claims ledger and resets its search counters, while cards and the ledger are
+  kept. **Pause** and **Resume** stop and restart one agent.
+- **New mission** sends a brief from the phone, to queue behind the current mission or to start now.
+
+Commands travel through one file, `missions/<id>/state/inbox.jsonl`. The daemon applies each within about 15
+seconds and writes the result back, so the hub can restart at any time without touching the run.
+
+On the box, next to a running daemon:
+
+```
+bash scripts/research_hub.sh
+```
+
+It starts the hub detached with a fixed token (log in `/kaggle/working/logs/hub.log`), registers the `deep` and
+`reader` servers as models, and writes the phone link to `sabha-research/box_logs/hub_link.txt`. That repo is
+private and the daemon pushes it every 10 minutes, so the link reaches you through git. By hand:
+
+```
+python -m sabha --tunnel cloudflared --research-repo /kaggle/working/sabha-research \
+       --model reader=http://127.0.0.1:8002/v1 --model deep=http://127.0.0.1:8001/v1 --no-think
+```
 
 ## Try it on your laptop (no GPU, 20 seconds)
 
@@ -71,6 +107,9 @@ Do not share the link.
 | `sabha/` | The hub. One aiohttp process: REST, WebSocket, model launcher, harness runs. |
 | `sabha/harness/` | Adapters. `dsh` (real agents), `mock` (demo), `chat` (no tools). |
 | `sabha/council.py` | Council sessions: split a paper, briefs, rounds, verdict. |
+| `sabha/research/` | The research daemon: paper workers, scouting, memory files, `live.py` (what each agent is doing), `inbox.py` (commands from the phone). |
+| `sabha/research_api.py` | The hub's Research endpoints: reads the daemon's data repo, queues commands. |
+| `scripts/research_hub.sh` | Starts the hub on the box next to a running daemon and writes the phone link. |
 | `sabha/webtools.py` | Key-free web access: `websearch`, `papers` (arXiv), `webread`. Standard library only. |
 | `web/` | The UI. Plain ES modules and CSS, no build step. |
 | `docs/PROTOCOL.md` | The contract between hub and UI. Read this to add a model kind or a harness. |

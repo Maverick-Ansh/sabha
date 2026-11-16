@@ -11,6 +11,7 @@ browser  <── HTTPS/WSS over a tunnel ──>  hub (aiohttp, one process)
                                            ├─ /ws     event stream   (token)
                                            ├─ model registry + launcher (vLLM or any OpenAI-compatible URL)
                                            ├─ harness runs (dsh | mock | chat), one subprocess per run
+                                           ├─ /api/research/*: reads the research daemon's data repo, queues commands for it
                                            └─ data dir: state.json, events.jsonl, workspaces/<mission_id>/
 ```
 
@@ -159,9 +160,16 @@ REST response as an ack and the event as the source of truth.
 | `DELETE /api/councils/{id}` | | `{ok:true}` |
 | `GET /api/councils/{id}/section?id=s1` | | `{ id, title, text }` one section of the paper |
 | `GET /api/events?since=0&limit=2000` | | `{ events, more }` (all persisted events) |
+| `GET /api/research[?mission=id]` | | Research overview, section 8 |
+| `GET /api/research/agent/{tid}` | | One research agent (track), section 8 |
+| `POST /api/research/summary/{tid}` | | `{ text, t, model, cached, fallback, error }` |
+| `POST /api/research/command` | `{ cmd, track?, text?, topic?, title?, brief?, mode?, hours? }` | `{ ok, applied_by, command?, mission, daemon_alive, note }` |
+| `GET /api/research/card/{arxiv_id}` | | `{ id, title, md, url }` one paper card as markdown |
+| `GET /api/research/doc?kind=K[&track=tid]` | | `{ kind, track, mission, md, mtime }` |
 
 `app`: `{ name: "Sabha", version, demo: bool }`.
-`system`: `{ platform: "colab"|"kaggle"|"local", started_ts, session_limit_s, data_dir, harnesses: { dsh: bool, mock: true, chat: true } }`.
+`system`: `{ platform: "colab"|"kaggle"|"local", started_ts, session_limit_s, data_dir, harnesses: { dsh: bool, mock: true, chat: true }, research: bool }`.
+`research` is true when a research data repo is attached (section 8).
 `harnesses.dsh` is true when the `dsh` binary is on PATH.
 
 Notes and steering. `dsh` headless takes one task per process, so a note cannot enter a
@@ -310,7 +318,98 @@ One streamed completion against the model, no tools. Emits `run.thinking` / `run
 ```
 python -m sabha [--host 127.0.0.1] [--port 8787] [--data ./sabha_data] [--token T] [--no-auth]
                 [--demo] [--tunnel none|cloudflared|ngrok] [--session-hours 12]
+                [--research-repo DIR] [--model NAME=URL ...] [--no-think]
 ```
+`--research-repo DIR` (default: env `SABHA_RESEARCH_REPO`) attaches the research daemon's data repo and turns on
+the Research view (section 8). `--model NAME=URL` registers a server that is already running as a plain
+`base_url` model (kind `chat`, served name = NAME); it is repeatable and skipped when a model called NAME exists.
+`--no-think` gives those models `extra_body: { chat_template_kwargs: { enable_thinking: false } }`.
+`scripts/research_hub.sh` starts the hub this way on the box next to a running daemon, with a fixed token, and
+writes the link to `<research repo>/box_logs/hub_link.txt`.
 `--demo` seeds a crew (4 agents on mock models) and starts two mock missions so there is
 something to watch at once. `--tunnel cloudflared` downloads the cloudflared binary if
 missing and prints the public link with the token in the hash.
+
+## 8. Research view
+
+The research daemon (`python -m sabha.research.run`, design in `docs/RESEARCH_PLAN.md`) is a separate
+process. It owns a data repo: `<repo>/missions/<id>/{brief.md, plan.json, cards/, tracks/<tid>/, memory/, state/}`.
+The hub is started with `--research-repo <repo>`. It only reads those files. It writes one thing: lines
+appended to `missions/<id>/state/inbox.jsonl`, the daemon's command inbox. An "agent" in the Research view is
+one track of the mission plan (`t1`..`t6`).
+
+```
+phone -> hub: POST /api/research/command -> state/inbox.jsonl -> daemon housekeeping loop (every ~15 s)
+                                                                   -> state/inbox_applied.json + a `command` event
+daemon threads -> research/live.py -> state/live.json (at most every 2 s, at least every 10 s) -> hub -> phone
+```
+
+### Files the two processes share (all under `missions/<id>/state/`)
+
+| File | Written by | What |
+|---|---|---|
+| `live.json` | daemon | `{ ts, epoch, mission, pid, slots: { w0..w5, maint, seeds }, tracks: { tid: { weight, paused, saturated, low_rounds, unconsolidated } } }`. A slot is `{ kind: worker|maintenance|seeds, step, since, ts, ...}`. Worker steps: `fetch`, `gate`, `map` (with `i` of `n`), `reduce`, `verify`, with `paper`, `title`, `track`. Maintenance steps: `scouting` (with `track`, `query`, `via`), `snowballing`, `consolidating`, `report`, `synthesis`; seeds: `seeds`. Every slot rests at `idle`. The hub treats the daemon as down when `epoch` is older than 90 s. |
+| `inbox.jsonl` | hub (append only) | One command per line: `{ id: "c_...", cmd, by, ts, ...fields }`. |
+| `inbox_applied.json` | daemon | `{ ids: [every applied id], items: [last 60: { id, cmd, track, text, ok, result, sent, ts }] }`. |
+| `directives.json` | daemon | `{ instructions: [{ id, track, text, ts }], focus: [{ id, track, topic, boost, ts }], paused: { tid: weight before } }`. |
+
+### Commands (`POST /api/research/command`)
+
+| `cmd` | Fields | What the daemon does |
+|---|---|---|
+| `instruct` | `track` (a track id or `"all"`), `text` (max 600 chars) | Adds a standing instruction. `memory.packet` prints the instructions of a track (and of `all`) near the top of every memory packet, so reading, scouting and consolidation all see them. |
+| `focus` | `track`, `topic` (max 120 chars) | Adds a priority topic: scouting is told to search for it and matching papers get a queue boost. Reopens a saturated track and brings its next search forward. |
+| `clear` | `track` | Clears that agent's context: drops its standing instructions and priority topics (also the validator's for that track), re-renders its digest from the claims ledger, resets its saturation and low-yield counters. Cards and the ledger are kept. With `"all"` this covers every track and the instructions addressed to everyone. |
+| `pause` / `resume` | `track` | Sets the track weight to 0 in `state/weights.json` (no new papers, no scouting; a paper being read is finished) / restores the weight it had. |
+| `mission` | `title`, `brief` (markdown), `mode` `queue`\|`preempt`, `hours` (0.5 to 12) | Writes `missions/<NNN-slug>/brief.md` with front matter `mode`, `hours`, `title`. `queue`: it starts when the current mission ends. `preempt`: the daemon finishes the papers in hand, syncs and switches to it; the old mission resumes afterwards. A brief the planner cannot plan is marked done with an `error` and skipped. |
+
+Every command is applied once (by `id`) and logged as an event `{ kind: "command", id, cmd, track, text, ok, result }`.
+STATUS.md lists standing instructions and the last 8 commands. If no daemon is working a mission (none running, or
+`live.json` is stale), the hub writes the brief of a `mission` command itself (`applied_by: "hub"`); every other
+command waits in the inbox, and the response says so (`daemon_alive: false`).
+
+### `GET /api/research`
+
+```jsonc
+{
+  "available": true,                 // false when the hub has no research repo (then only `hint` and `repo` are set)
+  "repo": "/kaggle/working/sabha-research", "now": 1763250000.0,
+  "missions": [ { "id", "status": "waiting|running|done", "error", "started", "title", "one_line", "tracks", "mode" } ],
+  "mission": { /* the active one: same fields, plus */ "hours", "status_line", "status_age_s", "has_synthesis",
+               "stats": { "cards", "queued", "reading", "rejected", "failed", "per_hour", "left_m", "errors" } },
+  "daemon": { "alive": true, "age_s": 3 },
+  "workers": { "total": 6, "busy": 4 },
+  "agents": [ { "id": "t1", "name", "one_line", "hue", "weight", "paused", "saturated",
+                "state": "working|idle|paused|saturated",
+                "counts": { "carded", "queued", "reading", "rejected", "failed" },
+                "now": [ { "slot": "w0", "kind", "step", "paper", "title", "i", "n", "query", "via", "since" } ],
+                "last_card": { "id", "title", "t" }, "instructions": 1, "focus": 0, "pending": 0 } ],
+  "team": [ /* busy slots that belong to no track: seeds, snowballing, synthesis */ ],
+  "feed": [ { "kind", "track", "id", "ok", "t", "text" } ],          // last 12 events, newest first, in plain words
+  "commands": { "pending": [ ... ], "applied": [ ... last 8, newest first ] },
+  "standing": { "instructions": [ ... ], "focus": [ ... ] }            // those addressed to "all"
+}
+```
+The active mission is the one whose `live.json` is fresh, else the running one, else the first that is not done.
+`?mission=<id>` reads another one. Times `t`, `since`, `started`, `now` are epoch seconds.
+
+### `GET /api/research/agent/{tid}`
+
+The agent row above, plus `mission`, `daemon_alive`, `deliverable`, `questions`, `events` (its last 15, newest first),
+`cards` (its last 8: `{ id, title, one_line, grade, quote_pass, causal, repo, t, secs }`), `queue` (next 5 papers),
+`digest` (markdown), `report_head` (first 1800 characters) and `report_chars`, `standing`
+(`{ instructions, focus }` for this track and for `all`), `board` (open questions addressed to it), `board_open`,
+`pending_commands`, and `summary` (`{ text, t, model, fallback }` or null).
+
+### `POST /api/research/summary/{tid}`
+
+One plain chat completion to the model called `reader` (a registered model with that name or served name, else
+`SABHA_READER_URL`, default `http://127.0.0.1:8002/v1`), thinking off, 340 tokens: 4 to 6 plain sentences on what
+the agent did, built from its counts, live state, last 8 card one-liners and last 15 events. The answer is kept
+for 5 minutes per agent (`cached: true`). If the model does not answer, the hub returns a summary built from the
+counts with `fallback: true` and the reason in `error`.
+
+### `GET /api/research/doc`
+
+`kind` is one of `status` (STATUS.md), `digest` (DIGEST.md), `synthesis`, `brief`, and with `track=<tid>`:
+`report`, `track_digest`, `assignment`. 404 when the file is not written yet.

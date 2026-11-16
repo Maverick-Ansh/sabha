@@ -11,7 +11,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import llm, sources as src
+from . import live, llm, sources as src
 from .memory import MEMORY_LESSON, Mission, append, base_id, now, packet, read_json, write, write_json
 
 # ---------------------------------------------------------------- schema helpers
@@ -197,6 +197,7 @@ def resolve_seed(m: Mission, t: dict, name: str, idx, budget: src.Budget) -> dic
 
 def resolve_seeds(m: Mission, idx, budget: src.Budget) -> list[dict]:
     jobs = [(t, n) for t in m.plan["tracks"] for n in t.get("seeds", [])[:12]]
+    live.begin(step="seeds", n=len(jobs))
     with ThreadPoolExecutor(4) as ex:
         out = list(ex.map(lambda tn: resolve_seed(m, tn[0], tn[1], idx, budget), jobs))
     picked = {(s["track"], s["name"]): s["id"] for s in out}
@@ -235,10 +236,14 @@ def triage(m: Mission, cands: list[dict], steer: dict) -> list[dict]:
               "rel 3: it directly answers a track question with a method or a measurement.\n"
               "rel 2: a related method, benchmark or dataset the track should know.\n"
               "rel 1: same broad area, not useful. rel 0: off topic.")
+    taste = m.taste[:700]
+    if taste:
+        sysmsg += "\nThe owner's taste counts: one step lower rel for the kind of work they say they distrust or skip."
+    tline = f"OWNER'S TASTE: {taste}\n" if taste else ""
 
     def one(c):
         try:
-            r = llm.chat_json("s1", sysmsg, f"MISSION: {m.plan.get('one_line', '')}\nTRACKS:\n{tlist}\n\n"
+            r = llm.chat_json("s1", sysmsg, f"MISSION: {m.plan.get('one_line', '')}\n{tline}TRACKS:\n{tlist}\n\n"
                               f"TITLE: {c['title']}\nABSTRACT: {c.get('abstract', '')[:1500]}", schema, max_tokens=40)
             return {**c, **r}
         except llm.LLMError:
@@ -265,6 +270,7 @@ GAP_SCHEMA = OBJ(gaps=ARR(OBJ(q=STR, why=STR)), queries=ARR(OBJ(text=STR, via=EN
 
 def scout(m: Mission, tid: str, idx, budget: src.Budget, steer: dict) -> dict:
     t = m.track(tid)
+    live.begin(step="scouting", track=tid, query="")
     claims = m.claims(tid)
     cover = {q["id"]: 0 for q in t.get("questions", [])}
     for c in claims.values():
@@ -302,6 +308,7 @@ def scout(m: Mission, tid: str, idx, budget: src.Budget, steer: dict) -> dict:
             m.log("query_refused", track=tid, text=text)
             continue
         via = q.get("via", "index")
+        live.set(query=text, via=via)
         hits = []
         try:
             hits = idx.query(text, k=30)
@@ -350,6 +357,7 @@ def scout(m: Mission, tid: str, idx, budget: src.Budget, steer: dict) -> dict:
 def triage_refs(m: Mission, idx, steer: dict, limit: int = 30) -> int:
     """Snowballing: references cited by carded papers, most-cited first."""
     cands = [r for r in m.reg.values() if r.get("state") == "cand"]
+    live.begin(step="snowballing", n=min(len(cands), limit))
     cands.sort(key=lambda r: -r.get("cited_by", 0))
     batch = []
     for r in cands[:limit]:
@@ -372,7 +380,7 @@ GATE_SCHEMA = OBJ(keep=BOOL, track=STR, model_type=ARR(ENUM(*MODEL_TYPES)), why=
 MAP_SCHEMA = OBJ(facts=ARR(OBJ(field=ENUM(*FIELDS), text=STR, sec=STR, quote=STR, status=ENUM("measured", "stated", "hypothesis"))),
                  repo_urls=ARR(STR), datasets=ARR(STR))
 CARD_SCHEMA = OBJ(
-    one_line=STR, model_type=ARR(ENUM(*MODEL_TYPES)),
+    one_line=STR, why_it_matters=STR, model_type=ARR(ENUM(*MODEL_TYPES)),
     training_method=OBJ(text=STR, ev=ARR(STR)), architecture=OBJ(text=STR, ev=ARR(STR)),
     losses=ARR(OBJ(name=STR, form=STR, ev=ARR(STR))),
     data=ARR(OBJ(name=STR, size=STR, license=STR, ev=ARR(STR))),
@@ -431,8 +439,10 @@ def read_paper(m: Mission, aid: str, idx, budget: src.Budget, steer: dict, max_c
     fullnorm = src.norm(full)
     tlist = "\n".join(f"{t['id']}: {t['name']}. {t['one_line']}" for t in m.plan["tracks"])
     intro = paper["sections"][0]["text"][:4000] if paper["sections"] else ""
+    live.set(step="gate", title=meta["title"], track=tid)
     try:
         gate = llm.chat_json("reader", _sys("You decide if a paper deserves a full read for the team. Answer in JSON."),
+                             (f"OWNER'S TASTE (keep false for work they say they distrust or skip):\n{m.taste[:900]}\n\n" if m.taste else "") +
                              f"TRACKS:\n{tlist}\nSUGGESTED TRACK: {tid}\n\nTITLE: {meta['title']}\nABSTRACT: {meta['abstract'][:2000]}\n\n"
                              f"INTRODUCTION (start):\n{intro}\n\nkeep: true if it gives a method, measurement, benchmark or dataset that a track needs. "
                              "track: the best track id. model_type: what the paper's main system is (a representation learner, world model, policy, "
@@ -449,6 +459,8 @@ def read_paper(m: Mission, aid: str, idx, budget: src.Budget, steer: dict, max_c
     t = m.track(tid)
     qs = "\n".join(f"- {q['id']}: {q['text']}" for q in t.get("questions", []))
     chunks = _rank_sections(paper["sections"])[:(24 if tier_b else max_chunks)]
+    lk = live.key()
+    live.set(step="map", track=tid, i=0, n=len(chunks))
     map_sys = _sys("""You extract facts from ONE part of a paper for your track. Answer in JSON.
 FIELDS: training_method (data, stages, schedule), architecture (modules, encoders, predictor, sizes), loss (objective and its form),
 data (dataset, size, license), result (a measured number with metric and setting), baseline (what it is compared against),
@@ -463,6 +475,8 @@ At most 10 facts, the ones that matter most for the track questions first. Skip 
                                  MAP_SCHEMA, max_tokens=900)
         except llm.LLMError:
             return {"facts": [], "repo_urls": [], "datasets": []}
+        finally:
+            live.tick(lk)
 
     with ThreadPoolExecutor(6) as ex:
         maps = list(ex.map(mapper, chunks))
@@ -481,6 +495,7 @@ At most 10 facts, the ones that matter most for the track questions first. Skip 
         m.mark(aid, state="failed", why=f"quote check: {len(facts)}/{total} facts verified")
         return "failed"
     near = _near_claims(m, tid, meta["abstract"], idx)
+    live.set(step="reduce", facts=len(facts))
     facts = facts[:60]
     fid = {f"F{i}": f for i, f in enumerate(facts, 1)}
     flines = "\n".join(f"{k} [{f.get('field', '?')}|{f.get('status', 'stated')}] {f.get('text') or f['quote']} || section: {f['sec']} || quote: {f['quote']}" for k, f in fid.items())
@@ -488,6 +503,8 @@ At most 10 facts, the ones that matter most for the track questions first. Skip 
         card = llm.chat_json("deep", _sys("""You write the paper card: the team's permanent memory of this paper. Answer in JSON.
 Use ONLY the verified facts (F1, F2, ...) and metadata below. ev = a list of fact ids that support the item, like ["F3","F7"].
 Never copy quotes into ev; code attaches the verified quote and section for each id. An item with no supporting fact gets ev [].
+why_it_matters: one plain sentence on why this paper matters (or does not) to the owner, judged by THE OWNER'S RESEARCH TASTE
+in the packet; "" when the packet has no taste.
 license: a real license name (MIT, Apache-2.0, CC-BY-4.0, ...) that a fact states, else "not_stated".
 Anything the facts do not cover is "not_stated". results: only numbers that appear in the facts.
 claims: 2 to 5 claims that answer your track questions (q = the question id). relation: supports / contradicts a ledger claim
@@ -500,6 +517,7 @@ questions_for_others: questions this paper raises that another track should answ
     except llm.LLMError as e:
         m.mark(aid, state="queued", why=f"reduce llm: {str(e)[:120]}")
         return "failed"
+    live.set(step="verify")
     lint = []
 
     def resolve(lst):
@@ -631,7 +649,10 @@ def card_md(c: dict) -> str:
         return "".join(f"\n  > \"{e['quote']}\" ({e['sec']})" for e in (lst or [])[:2])
     L = [f"# {c['title']}", f"`{c['id']}{c.get('version') or ''}` | first submitted {c.get('first_submitted')} | revised {c.get('last_revised')} "
          f"| tracks {', '.join(c.get('tracks', []))} | relevance {c.get('relevance')} | grade {c['quality']['grade']}",
-         "", f"**One line.** {c.get('one_line', '')}", f"**Model type.** {', '.join(c.get('model_type', []))}",
+         "", f"**One line.** {c.get('one_line', '')}"]
+    if c.get("why_it_matters"):
+        L.append(f"**Why it matters to you.** {c['why_it_matters']}")
+    L += [f"**Model type.** {', '.join(c.get('model_type', []))}",
          f"**Causal evidence.** {c.get('causal_evidence')}", "",
          f"**Training method.** {c.get('training_method', {}).get('text', '')}{ev(c.get('training_method', {}).get('ev'))}",
          f"**Architecture.** {c.get('architecture', {}).get('text', '')}{ev(c.get('architecture', {}).get('ev'))}", "", "**Losses.**"]
@@ -661,6 +682,7 @@ OPS_SCHEMA = OBJ(ops=ARR(OBJ(op=ENUM("add", "support", "contradict", "refine", "
 
 def consolidate(m: Mission, tid: str, since_ids: list[str]) -> int:
     t = m.track(tid)
+    live.begin(step="consolidating", track=tid, n=len(since_ids))
     ledger = m.claims(tid)
     new = []
     for aid in since_ids:
@@ -793,6 +815,7 @@ def write_report(m: Mission, tid: str) -> str:
     ranked = rank_cards(m, tid)
     if len(ranked) < 3:
         return ""
+    live.begin(step="report", track=tid, n=len(ranked))
     dig = ""
     try:
         dig = open(m.p("tracks", tid, "digest.md"), encoding="utf-8").read()[:4000]
@@ -821,7 +844,8 @@ def write_report(m: Mission, tid: str) -> str:
             txt = llm.chat("deep", _sys("You write part of a technical, evidence-based research report in markdown. "
                                         "Cite cards as [arxiv_id]. Use only the cards and digest given. No generic overview prose. "
                                         "Separate measured results from author hypotheses. Never call prediction causal understanding.\n"
-                                        "RESEARCH STANDARDS:\n" + std),
+                                        "RESEARCH STANDARDS:\n" + std +
+                                        ("\nTHE OWNER'S RESEARCH TASTE (write for this person):\n" + m.taste if m.taste else "")),
                            ctx + "\n\nWRITE THESE SECTIONS (a '## ' heading each):\n" + "\n".join(f"- {n}" for n in names),
                            max_tokens=1600, temperature=0.4, timeout=420)
         except llm.LLMError as e:
@@ -846,6 +870,7 @@ def _strip_unknown_cites(m: Mission, txt: str) -> str:
 
 def write_synthesis(m: Mission, final: bool = False) -> str:
     plan = m.plan
+    live.begin(step="synthesis", final=final)
     ctx = []
     for t in plan["tracks"]:
         try:
@@ -873,7 +898,8 @@ def write_synthesis(m: Mission, final: bool = False) -> str:
         try:
             txt = llm.chat("deep", _sys("You are the synthesis agent. Answer from the evidence in the track reports and ledgers only, "
                                         "cite [arxiv_id] and claim ids, say where evidence is missing or contested. "
-                                        "Do not force a JEPA answer if the evidence favours another design."),
+                                        "Do not force the answer the brief hopes for if the evidence favours another one." +
+                                        ("\nTHE OWNER'S RESEARCH TASTE (rank and recommend by it):\n" + m.taste if m.taste else "")),
                            base + "\n\nANSWER (a '## ' heading each):\n" + "\n".join(f"- {x}" for x in g),
                            max_tokens=1600, temperature=0.4, timeout=420)
         except llm.LLMError as e:

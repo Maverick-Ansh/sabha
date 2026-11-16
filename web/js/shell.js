@@ -4,8 +4,9 @@ import { subscribe, getState, sessionWindow } from './store.js';
 import { fmtDur, serverNow } from './format.js';
 import { isMuted, setMuted } from './notify.js';
 
-export const MODES = ['watch', 'talk', 'work', 'council'];
-const LABEL = { watch: 'Watch', talk: 'Talk', work: 'Work', council: 'Council' };
+export const MODES = ['research', 'watch', 'talk', 'work', 'council'];
+const LABEL = { research: 'Research', watch: 'Watch', talk: 'Talk', work: 'Work', council: 'Council' };
+const TAB_ICON = { research: 'flask', watch: 'orbit', talk: 'chat', work: 'board', council: 'crew' };
 
 function sunGlyph() {
   const ticks = [];
@@ -33,6 +34,9 @@ export function createTopbar({ onMode, onCrew, onPalette }) {
   const hl = h('span.seg-hl');
   const btns = MODES.map((m, i) => h('button', { 'aria-pressed': 'false', title: `${LABEL[m]} (${i + 1})`, onclick: () => onMode(m) }, LABEL[m]));
   const seg = h('div.seg.mode-switch', { role: 'tablist', 'aria-label': 'Mode' }, hl, btns);
+  // the same switch as a bottom tab bar: CSS shows it on phones and hides the segmented control there
+  const tabs = MODES.map((m) => h('button.tab', { 'aria-pressed': 'false', 'aria-label': LABEL[m], onclick: () => onMode(m) }, icon(TAB_ICON[m], 21, 1.6), h('span', null, LABEL[m])));
+  const tabbar = h('nav.tabbar', { 'aria-label': 'Mode' }, tabs);
 
   // session clock
   const C = 2 * Math.PI * 11;
@@ -63,6 +67,7 @@ export function createTopbar({ onMode, onCrew, onPalette }) {
 
   function setMode(mode) {
     btns.forEach((b, i) => b.setAttribute('aria-pressed', String(MODES[i] === mode)));
+    tabs.forEach((b, i) => b.setAttribute('aria-pressed', String(MODES[i] === mode)));
     requestAnimationFrame(() => {
       const b = btns[MODES.indexOf(mode)];
       if (!b) return;
@@ -126,5 +131,5 @@ export function createTopbar({ onMode, onCrew, onPalette }) {
   addEventListener('resize', () => setMode(getState().ui.mode));
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => setMode(getState().ui.mode));
   renderMute(); renderConn(getState().conn); renderClock();
-  return { el, setMode };
+  return { el, tabbar, setMode };
 }

@@ -121,3 +121,33 @@ kbd { font: 500 10px var(--f-mono); color: var(--ink-3); border: 1px solid var(-
   .mute-btn { display: none; }
   .mode-switch button { padding: 0 10px; font-size: 12.5px; }
 }
+
+/* bottom tab bar: the mode switch on a phone (same buttons as the segmented control in the top bar) */
+.tabbar { display: none; }
+@media (max-width: 640px) {
+  .tb-center { display: none; }
+  .topbar { grid-template-columns: 1fr auto; }
+  .tabbar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); flex: none; position: relative; z-index: 20;
+    padding: 5px 6px calc(5px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line);
+    background: rgba(var(--paper-rgb), .86); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); }
+  .tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; height: 50px; min-width: 0;
+    border: 0; background: none; border-radius: 14px; color: var(--ink-3); font: 500 10.5px/1 var(--f-ui); -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
+  .tab[aria-pressed="true"] { color: var(--action); }
+  .tab:active { transform: scale(.94); }
+}
+
+/* ---------- boot strip: the box coming up (web/js/boot.js) ---------- */
+.b-strip { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 18px; font-size: 12.5px;
+  background: rgba(var(--sun-rgb), .10); border-bottom: 1px solid rgba(var(--sun-rgb), .25); color: var(--ink-2); }
+.b-strip.ready { background: rgba(var(--mint-rgb), .10); border-bottom-color: rgba(var(--mint-rgb), .25); }
+.b-strip.failed { background: rgba(var(--coral-rgb), .10); border-bottom-color: rgba(var(--coral-rgb), .3); }
+.b-title { font-weight: 600; color: var(--ink); }
+.b-steps { display: flex; gap: 12px; flex-wrap: wrap; }
+.b-step { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.b-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
+.b-step.running .b-dot, .b-step.downloading .b-dot, .b-step.starting .b-dot { background: var(--sun); animation: b-pulse 1.4s ease-in-out infinite; }
+.b-step.ready .b-dot, .b-step.done .b-dot { background: var(--mint); }
+.b-step.failed .b-dot { background: var(--coral); }
+.b-note { flex: 1; min-width: 200px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes b-pulse { 50% { opacity: .35; } }

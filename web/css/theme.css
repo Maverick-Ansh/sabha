@@ -61,5 +61,4 @@ a { color: var(--sky-deep); }
 
 @media (max-width: 520px) {
   .mode-switch button { padding: 0 9px; font-size: 12px; }
-  .wm-text { display: none; }
 }
