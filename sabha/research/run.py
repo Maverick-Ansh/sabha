@@ -53,6 +53,8 @@ class Daemon:
         self.synth_draft_done = False
         self.synth_final_done = False
         self.final_reports_done = False
+        if os.environ.get("SABHA_S1"):  # e.g. SABHA_S1=reader: System-1 triage served by the 4B (no room for a 0.8B server)
+            llm.OVERRIDE["s1"] = os.environ["SABHA_S1"]
 
     # ------------------------------------------------------------ mission selection
     def pick_mission(self) -> Mission | None:
@@ -308,7 +310,7 @@ class Daemon:
         ev = read_jsonl(m.p("state", "events.jsonl"))
         hour = [e for e in ev if e.get("kind") == "carded" and time.time() - _ts(e.get("ts")) < 3600]
         sp = llm.speed()
-        health = " ".join(f"{r}:{'ok' if llm.up(r) else 'DOWN'}" for r in llm.ROLES)
+        health = " ".join(f"{r}=>{llm.OVERRIDE[r]}" if r in llm.OVERRIDE else f"{r}:{'ok' if llm.up(r) else 'DOWN'}" for r in llm.ROLES)
         applied = (read_json(m.p("state", "steering_applied.json"), {}) or {}).get("seq", 0)
         line = (f"{time.strftime('%H:%M')} up {int(up // 3600)}h{int(up % 3600 // 60):02d} left {int((self.until - time.time()) // 60)}m "
                 f"cards {len(cards)} queued {m.count('queued')} pph {len(hour)} {health} push {int((time.time() - self.last_push_ok) // 60) if self.last_push_ok else -1}m "
