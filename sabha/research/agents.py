@@ -876,8 +876,9 @@ def write_synthesis(m: Mission, final: bool = False) -> str:
         try:
             rep = open(m.p("tracks", t["id"], "report.md"), encoding="utf-8").read()
             summ = rep.split("##", 2)[1][:2200] if "##" in rep else rep[:2200]
-        except OSError:
-            summ = "(no report yet)"
+        except OSError:  # a short or early-finished run: a track with fewer than 3 cards has no report, so give its cards
+            cards = rank_cards(m, t["id"])[:8]
+            summ = ("(no report yet; the track's cards, best first:)\n" + "\n".join(_card_brief(c) for c in cards)) if cards else "(no report yet, no cards)"
         dig = ""
         try:
             dig = open(m.p("tracks", t["id"], "digest.md"), encoding="utf-8").read()[:1800]
