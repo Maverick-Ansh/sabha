@@ -50,10 +50,11 @@ def _sections(md: str, level: str) -> list[tuple[str, str]]:
     out, cur, buf = [], None, []
     for line in md.split("\n"):
         m = re.match(rf"^{level} +(.+)$", line)
-        if m:
+        higher = re.match(rf"^#{{1,{len(level) - 1}}} +", line) if len(level) > 1 else None
+        if m or higher:
             if cur is not None:
                 out.append((cur, "\n".join(buf).strip()))
-            cur, buf = m.group(1).strip(), []
+            cur, buf = (m.group(1).strip() if m else None), []
         elif cur is not None:
             buf.append(line)
     if cur is not None:
