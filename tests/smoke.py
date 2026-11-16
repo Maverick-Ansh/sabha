@@ -769,7 +769,11 @@ async def main() -> int:
         check("memory: read a document", st == 200 and doc["parts"] >= 1 and "joint-embedding" in doc["text"].lower(), str(doc)[:200])
         st, _ = await api.call("GET", "/api/memory/doc?id=no-such-doc")
         check("memory: unknown id -> 404", st == 404)
-        st, t3 = await api.call("POST", "/api/threads", {"agent_id": echo["id"]})
+        st, mm_model = await api.call("POST", "/api/models", {"name": "Fake-Memory", "kind": "chat", "base_url": fake_url,
+                                                              "served_name": "fake-llm", "context_window": 8192})
+        st, mm_agent = await api.call("POST", "/api/agents", {"name": "Rememberer", "role": "answers from memory",
+                                                              "model_id": mm_model["id"], "harness": "chat", "hue": "sky"})
+        st, t3 = await api.call("POST", "/api/threads", {"agent_id": mm_agent["id"]})
         mark = len(watch.events)
         st, r3 = await api.call("POST", f"/api/threads/{t3['id']}/messages", {"content": "MEMORYTEST what do we know about JEPA?"})
         msg = await watch.wait_for(lambda e: e["type"] == "thread.message" and e["data"]["message"]["id"] == r3["assistant_id"], 20, start=mark)

@@ -26,7 +26,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-REBUILD_S = 20.0
+REBUILD_S = 300.0  # also rebuilt at once whenever the signature changes
 PART_CHARS = 6000
 STOP = set("""a an the and or of to in on for with by is are was were be been being it its this that these those as at from
 what which who whom how why when where do does did can could should would will shall may might must i you we they he she
@@ -166,10 +166,26 @@ class Recall:
         self.avg_len = total / max(len(docs), 1)
         self.built = time.time()
 
+    def _signature(self) -> tuple:
+        """Cheap: changes whenever something new lands (store counts, research folder mtimes, the taste file)."""
+        st = self.hub.store
+        sig: list = [len(st.councils), len(st.missions), len(st.threads),
+                     sum(len(t.get("messages") or []) for t in st.threads.values()),
+                     sum(len(c.get("messages") or []) for c in st.councils.values()),
+                     sum(1 for m in st.missions.values() if m.get("result_text"))]
+        for root in self.research_roots():
+            for pat in ("*", "*/cards", "*/tracks/*"):
+                sig += [_mtime(d) for d in glob.glob(os.path.join(root, "missions", pat))]
+        taste = getattr(self.hub, "taste", None)
+        sig.append(_mtime(str(taste.path)) if taste is not None else 0)
+        return tuple(sig)
+
     def fresh(self) -> None:
         with self.lock:
-            if time.time() - self.built > REBUILD_S:
+            sig = self._signature()
+            if sig != getattr(self, "sig", None) or time.time() - self.built > 300:
                 self._build()
+                self.sig = sig
 
     # ------------------------------------------------------------ use
 
