@@ -38,15 +38,15 @@ Measured on a fresh Kaggle 2x T4 session: the link in 47 s, the agent tools and 
 downloads under 2 min (while installing), then 10.5 min of model warm-up: about 15 min in all. Qwen3.5-9B (4-bit) on GPU 0 does the deep thinking, Qwen3.5-4B on GPU 1 reads.
 
 Good to know:
-- **Keep the cell running.** It prints a status line every 4 minutes, which stops Kaggle from shutting an idle
-  session. Stopping the cell stops nothing else; run it again to get the link back (`SABHA_NEW_LINK=1` for a new one).
+- **Keep the cell running and the Kaggle tab open on an awake computer.** The cell prints a status line every 4 minutes,
+  which stops Kaggle from shutting an idle session. Stopping the cell stops nothing else; run it again to get the link back (`SABHA_NEW_LINK=1` for a new one).
 - **Keep the link private.** It carries the box's token: whoever has it controls the box.
 - **Kaggle limits:** a session ends after 12 hours, and you get about 30 GPU hours a week. Everything on the box is
   gone when the session ends, so download your research results first (or set a GitHub repo, below).
 - **Better web search:** free search engines answer only a few searches from Kaggle's servers. A free
   [Tavily](https://tavily.com) key fixes that: paste it in the Research tab, or add a Kaggle Secret `TAVILY_API_KEY`.
-- **Optional Kaggle Secrets:** `TAVILY_API_KEY`, `HF_TOKEN`, and `SABHA_GIT_REPO` (`owner/name`) with
-  `SABHA_GIT_TOKEN` to push research results to your own GitHub repo every 10 minutes.
+- **Optional Kaggle Secrets** (Add-ons > Secrets, and tick each one for this notebook): `TAVILY_API_KEY`, `HF_TOKEN`,
+  and `SABHA_GIT_REPO` (`owner/name`) with `SABHA_GIT_TOKEN` to push research results to your own GitHub repo every 10 minutes.
 - **Colab works too** (one T4, so one model does everything): [colab/sabha_colab.ipynb](colab/sabha_colab.ipynb).
 
 ## The modes

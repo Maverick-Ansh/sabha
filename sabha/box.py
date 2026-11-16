@@ -292,6 +292,15 @@ def hub_link() -> str:
     return m.group(1) if m else ""
 
 
+def box_uptime() -> float:
+    """Seconds since the box booted (Kaggle's 12 h clock starts then), 0 when unknown or implausible."""
+    try:
+        up_s = float(open("/proc/uptime", encoding="utf-8").read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0.0
+    return up_s if 0 < up_s < 12 * 3600 else 0.0
+
+
 def session_start() -> float:
     try:
         return float(open(os.path.join(RUN, "session.started"), encoding="utf-8").read().strip())
@@ -352,9 +361,9 @@ def up() -> str:
     if problem:
         say(problem)
         return ""
-    if not find(HUB_MARK) and not find(SUP_MARK):  # nothing of ours is running: a new session starts now
+    if not find(HUB_MARK) and not find(SUP_MARK):  # nothing of ours is running: the session started when the box booted
         with open(os.path.join(RUN, "session.started"), "w", encoding="utf-8") as f:
-            f.write(str(int(time.time())))
+            f.write(str(int(time.time() - box_uptime())))
         try:
             os.remove(BOOT)
         except OSError:
@@ -371,7 +380,8 @@ def up() -> str:
         say("Optional settings found: " + ", ".join(got))
 
     hub = find(HUB_MARK)
-    if hub and os.environ.get("SABHA_NEW_LINK") == "1":
+    dead_link = bool(hub) and TUNNEL != "none" and hub_link().startswith("http://127.0.0.1")  # the tunnel failed last time
+    if hub and (os.environ.get("SABHA_NEW_LINK") == "1" or dead_link):
         say("Restarting the hub for a new link (models and research keep running)...")
         kill_group(hub)
         hub = 0

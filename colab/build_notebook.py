@@ -22,11 +22,11 @@ and let them research for hours by **your research taste**.
 2. Run the cell below. In about 2 minutes it prints **one link**. Open it on your laptop or phone.
 3. The app shows the box coming up. The models are ready about 15 minutes later. Then: Talk, Council, Work, Research.
 
-Keep the link private: whoever has it controls this box. Keep this cell running: it keeps the session alive (Kaggle stops an idle
-session after about 20 minutes). A Kaggle session lasts at most 12 hours, and everything on the box goes when it ends,
+Keep the link private: whoever has it controls this box. Keep this cell running and this Kaggle tab open on an awake computer:
+that keeps the session alive (Kaggle stops an idle session after about 20 minutes). A Kaggle session lasts at most 12 hours, and everything on the box goes when it ends,
 so download your research results from the Research tab before that.
 
-Optional, as Kaggle Secrets (Add-ons > Secrets) or in the app's settings later: `TAVILY_API_KEY` (much better web search,
+Optional, as Kaggle Secrets (Add-ons > Secrets, then tick each one for this notebook) or in the app later: `TAVILY_API_KEY` (much better web search,
 free tier at tavily.com), `HF_TOKEN`, `SABHA_GIT_REPO` + `SABHA_GIT_TOKEN` (push research results to your own GitHub repo).
 """,
     "colab": """
@@ -52,7 +52,10 @@ APP = os.path.join(BASE, "sabha")
 if os.path.isdir(os.path.join(APP, ".git")):
     subprocess.run(["git", "-C", APP, "pull", "-q", "--ff-only"], check=False)
 else:
-    subprocess.run(["git", "clone", "-q", "--depth", "1", "{REPO}", APP], check=True)
+    r = subprocess.run(["git", "clone", "-q", "--depth", "1", "{REPO}", APP], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit("Could not download Sabha: is the Internet on? Right panel, Session options: Internet ON "
+                         "(Kaggle asks for a verified phone number once). Then run this cell again. " + r.stderr[-200:])
 if APP not in sys.path:
     sys.path.insert(0, APP)
 import sabha.box as box
