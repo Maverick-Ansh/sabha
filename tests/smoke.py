@@ -778,6 +778,9 @@ async def main() -> int:
         st, r3 = await api.call("POST", f"/api/threads/{t3['id']}/messages", {"content": "MEMORYTEST what do we know about JEPA?"})
         msg = await watch.wait_for(lambda e: e["type"] == "thread.message" and e["data"]["message"]["id"] == r3["assistant_id"], 20, start=mark)
         mm = (msg or {}).get("data", {}).get("message") or {}
+        if not mm:  # say what the thread holds, for the failure message
+            st, tdbg = await api.call("GET", f"/api/threads/{t3['id']}")
+            mm = {"debug": str(tdbg)[:700], "post": str(r3)[:200]}
         steps = mm.get("steps") or []
         check("talk: the agent searched memory and answered from the result", mm.get("content", "").startswith("Found it:")
               and steps and steps[0]["tool"] == "search_memory" and steps[0]["result"].endswith("found")
