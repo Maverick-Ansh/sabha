@@ -483,7 +483,7 @@ At most 10 facts, the ones that matter most for the track questions first. Skip 
     near = _near_claims(m, tid, meta["abstract"], idx)
     facts = facts[:60]
     fid = {f"F{i}": f for i, f in enumerate(facts, 1)}
-    flines = "\n".join(f"{k} [{f['field']}|{f['status']}] {f['text']} || section: {f['sec']} || quote: {f['quote']}" for k, f in fid.items())
+    flines = "\n".join(f"{k} [{f.get('field', '?')}|{f.get('status', 'stated')}] {f.get('text') or f['quote']} || section: {f['sec']} || quote: {f['quote']}" for k, f in fid.items())
     try:
         card = llm.chat_json("deep", _sys("""You write the paper card: the team's permanent memory of this paper. Answer in JSON.
 Use ONLY the verified facts (F1, F2, ...) and metadata below. ev = a list of fact ids that support the item, like ["F3","F7"].
