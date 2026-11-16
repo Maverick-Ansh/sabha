@@ -9,7 +9,8 @@ import { dispatchMission } from './composer.js';
 import { nav } from './nav.js';
 
 const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
-const SUGGEST = ['Plan the next experiment with me', 'What is loaded on the GPUs right now?', 'Summarise what the crew did today'];
+const SUGGEST = ['What has our research found so far?', 'Which papers fit my taste best, and why?', 'What did the last council conclude?', 'Plan the next experiment with me'];
+const STEP_ICON = { search_memory: 'search', read_memory: 'file', web_search: 'search', read_page: 'eye' };
 
 export function createTalk() {
   let agentId = null, threadId = null, mode = 'chat', railOpen = true, busyLocal = false;
@@ -120,7 +121,9 @@ export function createTalk() {
     const ag = agentById(agentId);
     col.appendChild(h('div.greeting', null,
       h('h1.display.italic', null, a, h('br'), h('span.greet-2', null, b)),
-      h('p.dim', null, ag ? `You are talking with ${ag.name}${ag.role ? ', who ' + ag.role : ''}. Chat for quick questions, Mission for real work.` : 'Seat an agent in Crew to begin.'),
+      h('p.dim', null, ag ? `You are talking with ${ag.name}${ag.role ? ', who ' + ag.role : ''}. Talk is where you think out loud with an agent. `
+        + 'It remembers everything this box has done (research runs, paper cards, councils, missions, earlier chats) and searches that, or the web, before it answers. '
+        + 'Flip to Mission when you want it to go off and do long work.' : 'Seat an agent in Crew to begin.'),
       h('div.suggest', null, SUGGEST.map((s) => h('button.chip', { onclick: () => { ta.value = s; fit(); ta.focus(); } }, s)))));
   }
 
@@ -134,6 +137,7 @@ export function createTalk() {
     if (m.role === 'system') { col.appendChild(h('div.msg.system', null, h('span.micro', null, m.content || ''))); return; }
     const b = assistantBubble(m.id);
     b.thinking = m.thinking || ''; b.text = m.content || '';
+    for (const st of m.steps || []) addStep(b, st);
     paintBubble(b, true);
   }
   function assistantBubble(id) {
@@ -144,12 +148,20 @@ export function createTalk() {
     const thinkHead = h('button.thought-head', { onclick: () => { b.userToggled = true; b.think.classList.toggle('open'); } }, h('span.micro', null, 'thought'), h('span.thought-live'), icon('chev-down', 13));
     const think = h('div.thought', { hidden: true }, thinkHead, thinkBody);
     const content = h('div.md.answer');
-    const elx = h('div.msg.agent', { 'data-hue': hueOf(a), 'data-id': id }, h('div.msg-who', null, h('span.dot'), h('span.micro', null, a ? a.name : 'agent')), think, content);
+    const stepsEl = h('div.steps', { hidden: true });
+    const elx = h('div.msg.agent', { 'data-hue': hueOf(a), 'data-id': id }, h('div.msg-who', null, h('span.dot'), h('span.micro', null, a ? a.name : 'agent')), think, stepsEl, content);
     col.appendChild(elx);
-    b = { id, el: elx, think, thinkBody, content, text: '', thinking: '', timer: 0, userToggled: false };
+    b = { id, el: elx, think, thinkBody, content, stepsEl, nSteps: 0, text: '', thinking: '', timer: 0, userToggled: false };
     bubbles.set(id, b);
     rendered.add(id);
     return b;
+  }
+  // one line per lookup the agent made (memory or web), live while it works and kept with the message
+  function addStep(b, st) {
+    if (!st) return;
+    b.stepsEl.hidden = false; b.nSteps += 1;
+    b.stepsEl.appendChild(h('div.step', { title: st.id || st.url || '' }, icon(STEP_ICON[st.tool] || 'search', 13),
+      h('span', null, st.label || st.tool), st.result ? h('span.dim', null, ` · ${st.result}`) : null));
   }
   function paintBubble(b, final) {
     if (b.thinking) { b.think.hidden = false; b.thinkBody.textContent = b.thinking; }
@@ -286,6 +298,7 @@ export function createTalk() {
     const b = assistantBubble(d.message_id);
     if (d.thinking) b.thinking += d.thinking;
     if (d.text) b.text += d.text;
+    if (d.step) addStep(b, d.step);
     paintBubble(b, false);
     if (stick) toBottom(true);
   });
@@ -298,7 +311,7 @@ export function createTalk() {
     const m = (ev.data || {}).message;
     if (!m || ev.thread_id !== threadId) return;
     const b = bubbles.get(m.id);
-    if (b) { b.text = m.content || b.text; b.thinking = m.thinking || b.thinking; paintBubble(b, true); if (m.role === 'assistant') { busyLocal = false; updateBusy(); } return; }
+    if (b) { b.text = m.content || b.text; b.thinking = m.thinking || b.thinking; if (!b.nSteps) for (const st of m.steps || []) addStep(b, st); paintBubble(b, true); if (m.role === 'assistant') { busyLocal = false; updateBusy(); } return; }
     const stick = atBottom();
     addMessage(m, true);
     if (m.role === 'assistant') { busyLocal = false; updateBusy(); }

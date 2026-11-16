@@ -129,8 +129,14 @@ async def fake_models(request):
 async def fake_chat(request):
     body = await request.json()
     FAKE_SEEN.append(body)
-    last = body["messages"][-1]["content"]
-    if "JSON array" in last:
+    last = body["messages"][-1]["content"] or ""
+    if body["messages"][-1]["role"] == "tool":  # Talk fed a tool result back: answer from it
+        pieces = [("content", "Found it: " + last[:40])]
+    elif body.get("tools") and "MEMORYTEST" in last:  # Talk with tools: ask to search memory first
+        pieces = [("tool_calls", [{"index": 0, "id": "call_1", "type": "function",
+                                   "function": {"name": "search_memory", "arguments": ""}}]),
+                  ("tool_calls", [{"index": 0, "function": {"arguments": json.dumps({"query": "joint embedding predictive"})}}])]
+    elif "JSON array" in last:
         pieces = [("content", '["Read the brief", "Write the code",'), ("content", ' "Test it"]')]
     else:
         pieces = [("reasoning_content", "Thinking about it. "), ("content", "<thi"),
@@ -554,8 +560,11 @@ async def main() -> int:
               and mm["content"] == "Hello from the fake model."
               and "Thinking about it." in mm["thinking"] and "inline thought" in mm["thinking"], mm and str(mm))
         sent = FAKE_SEEN[-1] if FAKE_SEEN else {}
-        check("chat request: stream + persona system + history", sent.get("stream") is True
-              and sent["messages"][0] == {"role": "system", "content": "You are Echo.\n\nYour name is Echo. Your role: answers."}
+        check("chat request: stream + Talk system prompt (persona, memory) + tools + history", sent.get("stream") is True
+              and sent["messages"][0]["role"] == "system" and "You are Echo" in sent["messages"][0]["content"]
+              and "Your own angle: You are Echo." in sent["messages"][0]["content"]
+              and "WHAT THE BOX REMEMBERS" in sent["messages"][0]["content"]
+              and [t["function"]["name"] for t in sent.get("tools") or []] == ["search_memory", "read_memory", "web_search", "read_page"]
               and sent["messages"][-1] == {"role": "user", "content": "hi"} and sent.get("model") == "fake-llm", str(sent)[:300])
         st, m = await api.call("POST", "/api/missions", {"prompt": "Say hello", "agent_id": echo["id"]})
         ev = await watch.wait_for(mission_is(m["id"], "done", "failed"), 20)
@@ -752,6 +761,25 @@ async def main() -> int:
               and f"{rmid}/taste.md" in names and any(n.startswith(f"{rmid}/cards/") for n in names), str(names[:8]))
         st, _ = await api.call("GET", "/api/research/export/no-such-mission")
         check("research: export of an unknown mission -> 404", st == 404)
+        # ---------------- memory: search and read what the box did, and Talk using it through a tool call
+        st, mem = await api.call("GET", "/api/memory/search?q=joint%20embedding%20predictive")
+        hit = next((x for x in (mem.get("hits") or []) if x["id"].startswith("card:")), None) if st == 200 else None
+        check("memory: search finds the research card", hit is not None and "2301.08243" in hit["id"], str(mem)[:300])
+        st, doc = await api.call("GET", f"/api/memory/doc?id={hit['id'] if hit else 'x'}")
+        check("memory: read a document", st == 200 and doc["parts"] >= 1 and "joint-embedding" in doc["text"].lower(), str(doc)[:200])
+        st, _ = await api.call("GET", "/api/memory/doc?id=no-such-doc")
+        check("memory: unknown id -> 404", st == 404)
+        st, t3 = await api.call("POST", "/api/threads", {"agent_id": echo["id"]})
+        mark = len(watch.events)
+        st, r3 = await api.call("POST", f"/api/threads/{t3['id']}/messages", {"content": "MEMORYTEST what do we know about JEPA?"})
+        msg = await watch.wait_for(lambda e: e["type"] == "thread.message" and e["data"]["message"]["id"] == r3["assistant_id"], 20, start=mark)
+        mm = (msg or {}).get("data", {}).get("message") or {}
+        steps = mm.get("steps") or []
+        check("talk: the agent searched memory and answered from the result", mm.get("content", "").startswith("Found it:")
+              and steps and steps[0]["tool"] == "search_memory" and steps[0]["result"].endswith("found")
+              and steps[0]["result"] != "nothing found", str(mm)[:400])
+        live_steps = [e for e in watch.events[mark:] if e["type"] == "chat.delta" and (e.get("data") or {}).get("step")]
+        check("talk: the step streamed live", len(live_steps) >= 1)
         st, r = await api.call("POST", "/api/research/start", {"topic": "A second question about planning with models?", "hours": 0.5})
         check("research: a second run starts after the first ended", st == 200 and r["running"], str(r)[:200])
         st, r = await api.call("POST", "/api/research/stop", {"mode": "now"})

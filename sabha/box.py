@@ -69,7 +69,7 @@ CREW = [  # name, role, preferred model role, hue, persona
     ("Lead", "chairs the council and keeps it on the question", "deep", "sky",
      "You weigh what the others say and look for the one thing that decides the question."),
     ("Scout", "reads fast and reports what is there", "reader", "mint",
-     "You report exactly what the text says, with numbers, and nothing more."),
+     "You find things fast and report what is really there, with numbers and sources."),
     ("Critic", "doubts every claim until it sees the evidence", "deep", "rose",
      "You are a sceptical reviewer. You look for missing controls, weak baselines and claims bigger than the evidence."),
     ("Builder", "asks how you would reproduce it", "reader", "sun",

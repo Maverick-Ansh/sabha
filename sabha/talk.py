@@ -8,6 +8,11 @@ text, delta.reasoning_content / delta.reasoning becomes thinking, and inline
 the hub with a short scripted reply.
 
 `stream_chat` is also used for plan proposals and by the chat harness.
+
+A Talk reply is a conversation, not a task: the agent gets a system prompt that tells it where it is
+and what the box remembers (recall.py), and four read-only tools it may call before it answers:
+search_memory, read_memory, web_search, read_page. Up to MAX_HOPS rounds of tool calls per reply,
+each shown in the app as a step. Long work (files, code, hours) belongs in a mission (Work).
 """
 
 from __future__ import annotations
@@ -17,9 +22,11 @@ import json
 import logging
 import random
 import re
+import time
 
 import aiohttp
 
+from . import webtools
 from .harness.mock import topic_of
 from .models import auth_headers
 from .util import ApiError, mock_speed, new_id, now, short
@@ -27,6 +34,48 @@ from .util import ApiError, mock_speed, new_id, now, short
 log = logging.getLogger("sabha.talk")
 
 CARD_MAX_CHARS = 6000
+MAX_HOPS = 6
+
+TALK_RULES = """You are {name}, one of the agents of Sabha: the owner's own AI team, running on their GPU box. {role}
+{persona}
+How to talk:
+- Talk like a thoughtful colleague: warm, direct and curious. Small talk gets a short, friendly answer; a real question gets a full one.
+- First understand what the owner wants. If a request is genuinely unclear, ask one short question. Otherwise go ahead.
+- When something needs more than one step, say your plan in two to four short lines, then carry it out in this same reply.
+- You can use the box's whole memory: research runs (briefs, paper cards, track reports, syntheses), councils (paper discussions and verdicts), Work missions and their reports, earlier chats, and the owner's research taste. Whenever a question touches anything done before, call search_memory first (try other words if it misses), read_memory for the details, then answer and name what you used by its id in brackets, like [card:001-x/2301.08243].
+- For facts from the outside world, call web_search and read_page, and name your sources.
+- Never invent papers, numbers or findings. If memory and the web have nothing, say so plainly.
+- For long work (writing code or files, many steps, hours of reading), offer to turn it into a mission: the owner flips the composer to Mission, or starts a research run in the Research tab. Say what that mission would do.
+
+WHAT THE BOX REMEMBERS (ids in brackets):
+{overview}
+{taste}Today is {today}."""
+
+TOOLS = [
+    {"type": "function", "function": {
+        "name": "search_memory",
+        "description": "Search everything this box has done: research runs, paper cards, track reports, syntheses, councils, "
+                       "Work missions, earlier chats, the owner's research taste. Returns ids, titles and matching snippets.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "a few keywords"},
+            "kind": {"type": "string", "description": "optional filter, comma separated: research, synthesis, report, digest, "
+                                                      "card, council, mission, chat, taste"}},
+            "required": ["query"]}}},
+    {"type": "function", "function": {
+        "name": "read_memory",
+        "description": "Read one memory document by its id (6000 characters a part; ask for part 2, 3 ... for more).",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "part": {"type": "integer"}},
+                       "required": ["id"]}}},
+    {"type": "function", "function": {
+        "name": "web_search",
+        "description": "Search the web. Returns titles, links and snippets.",
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+    {"type": "function", "function": {
+        "name": "read_page",
+        "description": "Read a web page or PDF by its link (an arXiv id works too). Optional find: a word to jump to.",
+        "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "find": {"type": "string"}},
+                       "required": ["url"]}}},
+]
 
 
 class ChatError(Exception):
@@ -110,11 +159,15 @@ async def stream_chat(
     *,
     max_tokens: int | None = None,
     timeout_s: float = 900,
+    tools: list | None = None,
+    calls: list | None = None,
 ) -> tuple[str, str, dict | None]:
     """Stream one chat completion. Returns (text, thinking, usage or None).
 
     on_piece(kind, piece) is called for each streamed piece, kind being
     "text" or "thinking". Raises ChatError on connection or HTTP errors.
+    With tools (OpenAI function schemas), the model may call them: each call
+    {id, name, arguments (JSON text)} is appended to the calls list.
     """
     base = (model.get("base_url") or "").rstrip("/")
     if not base:
@@ -127,6 +180,10 @@ async def stream_chat(
     }
     if max_tokens:
         body["max_tokens"] = max_tokens
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+    acc: dict[int, dict] = {}  # streamed tool calls by index
     extra = model.get("extra_body")
     if isinstance(extra, dict):  # per-model request fields, e.g. chat_template_kwargs
         body.update({k: v for k, v in extra.items() if k not in ("model", "messages", "stream")})
@@ -158,6 +215,20 @@ async def stream_chat(
             if isinstance(content, str):
                 for kind, s in splitter.feed(content):
                     piece(kind, s)
+            for j, tc in enumerate(delta.get("tool_calls") or []):
+                if not isinstance(tc, dict):
+                    continue
+                a = acc.setdefault(tc.get("index", j) if isinstance(tc.get("index"), int) else j,
+                                   {"id": "", "name": "", "arguments": ""})
+                fn = tc.get("function") or {}
+                if tc.get("id"):
+                    a["id"] = tc["id"]
+                if fn.get("name") and not a["name"]:
+                    a["name"] = fn["name"]
+                if isinstance(fn.get("arguments"), str):
+                    a["arguments"] += fn["arguments"]
+                elif isinstance(fn.get("arguments"), dict):
+                    a["arguments"] = json.dumps(fn["arguments"])
 
     timeout = aiohttp.ClientTimeout(total=timeout_s, sock_connect=15, sock_read=600)
     try:
@@ -198,6 +269,8 @@ async def stream_chat(
         raise ChatError(f"could not reach {url}: {e}") from None
     for kind, s in splitter.flush():
         piece(kind, s)
+    if calls is not None:
+        calls.extend(a for _, a in sorted(acc.items()) if a["name"])
     return "".join(text_parts), "".join(think_parts), usage
 
 
@@ -265,6 +338,7 @@ class TalkManager:
         self.store = hub.store
         self.bus = hub.bus
         self.tasks: dict[str, asyncio.Task] = {}
+        self.no_tools: set[str] = set()  # model ids whose server refused the tools field (then: plain chat)
 
     def recover(self) -> None:
         for t in self.store.threads.values():
@@ -289,9 +363,11 @@ class TalkManager:
         self.store.mark_dirty()
 
     def append(self, thread: dict, role: str, content: str, *, thinking: str = "",
-               mission_id: str | None = None, msg_id: str | None = None) -> dict:
+               mission_id: str | None = None, msg_id: str | None = None, steps: list | None = None) -> dict:
         msg = {"id": msg_id or new_id("msg"), "role": role, "content": content, "thinking": thinking,
                "ts": now(), "mission_id": mission_id}
+        if steps:
+            msg["steps"] = steps
         thread["messages"].append(msg)
         thread["updated_ts"] = msg["ts"]
         self.bus.emit("thread.message", {"message": msg}, thread_id=thread["id"],
@@ -352,13 +428,26 @@ class TalkManager:
         self.tasks[thread_id] = asyncio.create_task(self._reply(thread_id, assistant_id))
         return {"user": user, "assistant_id": assistant_id}
 
-    def _history(self, thread: dict, agent: dict, model: dict) -> list[dict]:
+    def _system(self, thread: dict, agent: dict) -> str:
+        """Blocking (builds the memory catalogue): call through asyncio.to_thread."""
         persona = (agent.get("persona") or "").strip()
-        system = persona or f"You are {agent.get('name')}."
-        if agent.get("role"):
-            system += f"\n\nYour name is {agent.get('name')}. Your role: {agent['role']}."
+        recall = getattr(self.hub, "recall", None)
+        overview = recall.overview(exclude=f"chat:{thread['id']}") if recall else "(memory is not available)"
+        taste = self.hub.taste.load() if getattr(self.hub, "taste", None) else {}
+        tl = (f"THE OWNER'S RESEARCH TASTE: {short(taste['taste'], 700)}\n" if taste.get("taste") else "")
+        return TALK_RULES.format(
+            name=agent.get("name") or "an agent", role=f"Your role in the team: {agent['role']}." if agent.get("role") else "",
+            persona=f"Your own angle: {persona}\n" if persona else "", overview=overview, taste=tl,
+            today=time.strftime("%Y-%m-%d"))
+
+    def _history(self, thread: dict, agent: dict, model: dict, system: str | None = None) -> list[dict]:
+        if system is None:
+            persona = (agent.get("persona") or "").strip()
+            system = persona or f"You are {agent.get('name')}."
+            if agent.get("role"):
+                system += f"\n\nYour name is {agent.get('name')}. Your role: {agent['role']}."
         msgs: list[dict] = []
-        budget = max(4000, int((model.get("context_window") or 8192) * 2))  # ~half the window in chars
+        budget = max(4000, int((model.get("context_window") or 8192) * 1.2))  # chars; leaves room for tool results
         used = 0
         for m in reversed(thread["messages"]):
             if m["role"] == "system":
@@ -393,9 +482,15 @@ class TalkManager:
         error = ""
         stopped = False
 
+        steps: list[dict] = []
+
         def piece(kind: str, s: str) -> None:
             (text_parts if kind == "text" else think_parts).append(s)
             self.bus.emit("chat.delta", {"message_id": msg_id, kind: s}, thread_id=thread_id,
+                          agent_id=thread.get("agent_id"), ephemeral=True)
+
+        def on_step(step: dict) -> None:
+            self.bus.emit("chat.delta", {"message_id": msg_id, "step": step}, thread_id=thread_id,
                           agent_id=thread.get("agent_id"), ephemeral=True)
 
         try:
@@ -406,7 +501,9 @@ class TalkManager:
             elif model.get("kind") == "mock":
                 await self._mock_stream(thread, agent, model, piece)
             else:
-                await stream_chat(self.hub.http, model, self._history(thread, agent, model), piece)
+                system = await asyncio.to_thread(self._system, thread, agent)
+                msgs = self._history(thread, agent, model, system)
+                await self._converse(thread, model, msgs, piece, on_step, steps, text_parts)
         except asyncio.CancelledError:
             stopped = True
         except ChatError as e:
@@ -426,9 +523,85 @@ class TalkManager:
             content = "(stopped)"
         self.bus.emit("chat.done", {"message_id": msg_id}, thread_id=thread_id,
                       agent_id=thread.get("agent_id"), ephemeral=True)
-        self.append(thread, "assistant", content, thinking="".join(think_parts).strip(), msg_id=msg_id)
+        self.append(thread, "assistant", content, thinking="".join(think_parts).strip(), msg_id=msg_id, steps=steps)
         thread["busy"] = False
         self._updated(thread)
+
+    async def _converse(self, thread: dict, model: dict, msgs: list[dict], piece, on_step, steps: list, text_parts: list) -> None:
+        """One Talk reply: stream, run the tool calls the model asks for, feed the results back, repeat (MAX_HOPS)."""
+        use_tools = model.get("id") not in self.no_tools
+        hop = 0
+        while hop <= MAX_HOPS:
+            calls: list[dict] = []
+            try:
+                text, _, _ = await stream_chat(self.hub.http, model, msgs, piece, calls=calls,
+                                               tools=TOOLS if use_tools and hop < MAX_HOPS else None)
+            except ChatError as e:
+                if use_tools and hop == 0 and not text_parts and re.search(r"HTTP 400.*tool", str(e), re.I | re.S):
+                    log.info("model %s refused tools; plain chat from now on: %s", model.get("name"), short(str(e), 160))
+                    self.no_tools.add(model.get("id"))
+                    use_tools = False
+                    continue
+                raise
+            if not calls:
+                return
+            ids = [c["id"] or f"call_{hop}_{i}" for i, c in enumerate(calls)]
+            msgs.append({"role": "assistant", "content": text or "", "tool_calls": [
+                {"id": ids[i], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
+                for i, c in enumerate(calls)]})
+            for i, c in enumerate(calls):
+                try:
+                    args = json.loads(c["arguments"] or "{}")
+                except ValueError:
+                    args = {}
+                result, step = await asyncio.to_thread(self._tool, c["name"], args if isinstance(args, dict) else {}, thread["id"])
+                steps.append(step)
+                on_step(step)
+                msgs.append({"role": "tool", "tool_call_id": ids[i], "content": result})
+            if "".join(text_parts).strip() and not "".join(text_parts).endswith("\n"):
+                piece("text", "\n\n")
+            hop += 1
+
+    def _tool(self, name: str, args: dict, thread_id: str) -> tuple[str, dict]:
+        """Run one read-only Talk tool. Returns (text for the model, step for the app). Blocking."""
+        recall = self.hub.recall
+        if name == "search_memory":
+            q = str(args.get("query") or "").strip()
+            hits = recall.search(q, str(args.get("kind") or ""), 8, exclude=f"chat:{thread_id}") if q else []
+            step = {"tool": name, "label": f"searched memory for “{short(q, 60)}”", "result": f"{len(hits)} found" if hits else "nothing found"}
+            if not hits:
+                return "No matches in memory. Try other words, or another kind.", step
+            return "\n\n".join(f"[{h['id']}] {h['title']}\n{h['snippet']}" for h in hits), step
+        if name == "read_memory":
+            r = recall.read(str(args.get("id") or "").strip().strip("[]"), args.get("part") or 1)
+            if r is None:
+                return f"No memory document has the id {args.get('id')!r}. Use an id from search_memory.", \
+                    {"tool": name, "label": f"read {short(str(args.get('id')), 60)}", "result": "not found"}
+            return (f"[{r['id']}] {r['title']} (part {r['part']} of {r['parts']})\n\n{r['text']}",
+                    {"tool": name, "label": f"read {short(r['title'], 70)}", "result": f"part {r['part']} of {r['parts']}", "id": r["id"]})
+        if name == "web_search":
+            q = str(args.get("query") or "").strip()
+            step = {"tool": name, "label": f"searched the web for “{short(q, 60)}”"}
+            try:
+                hits, engine = webtools.search(q, 6)
+            except Exception as e:  # noqa: BLE001 (any engine failure is a message for the model, not a crash)
+                return f"Web search failed: {short(str(e), 300)}", {**step, "result": "failed"}
+            return ("\n\n".join(f"{h.get('title')}\n{h.get('url')}\n{h.get('snippet') or ''}" for h in hits),
+                    {**step, "result": f"{len(hits)} results ({engine})"})
+        if name == "read_page":
+            url = str(args.get("url") or "").strip()
+            if webtools.ARXIV_ID.fullmatch(url):
+                url = f"https://arxiv.org/abs/{url}"
+            find = str(args.get("find") or "").strip()
+            try:
+                title, text = webtools.page_text(url)
+            except Exception as e:  # noqa: BLE001
+                return f"Could not read {url}: {short(str(e), 300)}", {"tool": name, "label": f"read {short(url, 70)}", "result": "failed"}
+            i = text.lower().find(find.lower()) if find else -1
+            start = max(0, i - 1500) if i >= 0 else 0
+            return (f"{title}\n{url}\n\n{text[start:start + 6000]}",
+                    {"tool": name, "label": f"read {short(title or url, 70)}", "result": f"{len(text) // 1000}k characters", "url": url})
+        return f"There is no tool named {name}.", {"tool": name, "label": f"unknown tool {short(name, 40)}", "result": "failed"}
 
     async def _mock_stream(self, thread: dict, agent: dict, model: dict, piece) -> None:
         user_msgs = [m for m in thread["messages"] if m["role"] == "user"]

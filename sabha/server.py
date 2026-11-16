@@ -29,6 +29,7 @@ from .harness.dsh import dsh_path
 from .missions import MissionManager
 from .models import ModelManager
 from .research_api import Research, add_routes as add_research_routes
+from .recall import Recall
 from .research_run import Runner, read_boot
 from .settings import Settings, Taste
 from .store import Store
@@ -91,6 +92,7 @@ class Hub:
         os.makedirs(os.path.join(cfg.research_repo, "missions"), exist_ok=True)
         self.settings = Settings(cfg.data_dir)  # also puts a saved Tavily key into the environment
         self.taste = Taste(cfg.data_dir)
+        self.recall = Recall(self)  # the box's memory, searched by Talk
         self.research = Research(self)
         self.runner = Runner(self, cfg.research_repo)
         self.sockets: set[web.WebSocketResponse] = set()
@@ -300,6 +302,28 @@ async def get_state(request):
 
 
 # ---- box boot strip, settings, research taste and runs started from the app (PROTOCOL.md sections 8 and 9)
+
+async def memory_search(request):
+    q = request.query
+    try:
+        k = int(q.get("k") or 8)
+    except ValueError:
+        k = 8
+    hits = await asyncio.to_thread(_hub(request).recall.search, q.get("q", ""), q.get("kind", ""), k)
+    return web.json_response({"hits": hits})
+
+
+async def memory_doc(request):
+    q = request.query
+    try:
+        part = int(q.get("part") or 1)
+    except ValueError:
+        part = 1
+    doc = await asyncio.to_thread(_hub(request).recall.read, q.get("id", ""), part)
+    if doc is None:
+        raise ApiError(404, "no memory document with that id")
+    return web.json_response(doc)
+
 
 async def get_boot(request):
     return web.json_response(await asyncio.to_thread(read_boot, _hub(request).cfg.data_dir))
@@ -661,6 +685,8 @@ def create_app(hub: Hub) -> web.Application:
     r.add_get("/api/councils/{id}/section", council_section)
     r.add_get("/api/events", all_events)
     add_research_routes(r, _hub, _body)
+    r.add_get("/api/memory/search", memory_search)
+    r.add_get("/api/memory/doc", memory_doc)
     r.add_get("/api/boot", get_boot)
     r.add_get("/api/settings", get_settings)
     r.add_put("/api/settings", put_settings)

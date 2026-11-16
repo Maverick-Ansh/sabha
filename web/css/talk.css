@@ -102,3 +102,10 @@
   .talk-foot { padding: 4px 10px 12px; }
   .greeting { padding-top: 5vh; }
 }
+
+/* lookups an agent made while answering (search_memory, read_memory, web_search, read_page) */
+.steps { display: flex; flex-direction: column; gap: 3px; margin: 0 0 10px; padding: 8px 12px; border-radius: 12px;
+  background: rgba(var(--hue-rgb, var(--sky-rgb)), .06); border: 1px solid var(--line-2); font-size: 13px; color: var(--ink-2); }
+.step { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.step span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step svg { flex: none; color: var(--ink-3); }
