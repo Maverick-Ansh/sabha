@@ -500,7 +500,7 @@ def _chunks(text: str, size: int) -> list[str]:
     return out
 
 
-def paper(source: str = "", text: str = "", max_section: int = 14000) -> dict:
+def paper(source: str = "", text: str = "", max_section: int = 14000, api: bool = True) -> dict:
     """A paper as { title, authors, url, abstract, sections: [{title, text}] }.
 
     `source` is an arXiv id or link, or any page or PDF link. `text` is pasted
@@ -521,6 +521,8 @@ def paper(source: str = "", text: str = "", max_section: int = 14000) -> dict:
             aid = m.group(1) + (m.group(2) or "")
             url = f"https://arxiv.org/abs/{aid}"
             try:
+                if not api:  # the arXiv API answers 429 from shared Kaggle IPs; callers pass known metadata
+                    raise WebError("api skipped")
                 hits = _arxiv({"id_list": aid})
                 if hits and hits[0]["title"]:
                     meta.update(title=hits[0]["title"], authors=hits[0]["authors"], abstract=hits[0]["abstract"])
