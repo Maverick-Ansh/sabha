@@ -134,9 +134,11 @@ def paper_text(aid: str, max_section: int = 10000) -> dict:
             "full": full, "refs": refs, "kind": kind}
 
 
-def arxiv_search(query: str, n: int = 25) -> list[dict]:
-    """arxiv.org/search HTML (the JSON API is blocked from Kaggle). [{id,title,abstract,submitted}]"""
-    q = urllib.parse.urlencode({"query": query, "searchtype": "all", "abstracts": "show", "size": 50 if n > 25 else 25})
+def arxiv_search(query: str, n: int = 25, order: str = "") -> list[dict]:
+    """arxiv.org/search HTML (the JSON API is blocked from Kaggle). [{id,title,abstract,submitted}]
+    order "" = relevance (the site default is newest first, which hides the original papers)."""
+    q = urllib.parse.urlencode({"query": query, "searchtype": "all", "abstracts": "show", "order": order,
+                                "size": 50 if n > 25 else 25})
     raw, _, _ = _get(f"https://arxiv.org/search/?{q}", "arxiv_search", 8.0, timeout=60)
     page = raw.decode("utf-8", "replace")
     out = []

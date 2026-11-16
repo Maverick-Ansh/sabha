@@ -100,6 +100,7 @@ class Index:
         self.loaded: set[str] = set()
         self.lock = threading.Lock()
         self._model = None
+        self.qlock = threading.Lock()  # one tokenizer/model, called from several threads
         self.last_refresh = 0.0
 
     def __len__(self) -> int:
@@ -139,15 +140,14 @@ class Index:
         return len(add_m)
 
     def _qvec(self, text: str) -> np.ndarray:
-        if self._model is None:
-            self._model = load_model(self.device)
-        return embed(*self._model, [QUERY_PREFIX + text], self.device)[0].astype(np.float32)
+        return self.vec_of(QUERY_PREFIX + text)
 
     def vec_of(self, text: str) -> np.ndarray:
-        """Document-side embedding (no query prefix), for comparing abstracts to each other."""
-        if self._model is None:
-            self._model = load_model(self.device)
-        return embed(*self._model, [text], self.device)[0].astype(np.float32)
+        """Embedding of one text (the query path adds the bge query prefix)."""
+        with self.qlock:
+            if self._model is None:
+                self._model = load_model(self.device)
+            return embed(*self._model, [text], self.device)[0].astype(np.float32)
 
     def query(self, text: str, k: int = 40, exclude: set | None = None) -> list[dict]:
         with self.lock:

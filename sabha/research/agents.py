@@ -139,51 +139,82 @@ def plan_mission(m: Mission) -> dict:
 # ---------------------------------------------------------------- seeds
 
 
+def _name_rx(name: str):
+    """Exact-name pattern with word boundaries ('I-JEPA' must not match 'CI-JEPA').
+    Named things (a capital or digit after the first letter) match case-sensitively; topics don't count as seeds."""
+    name = name.strip()
+    named = bool(re.search(r"[A-Z0-9]", name[1:]))
+    pat = re.escape(name).replace(r"\ ", r"[\s\-]?")
+    return pat, re.compile(rf"(?<![\w\-]){pat}(?![\w\-])", 0 if named else re.I), named
+
+
+def _introduces(c: dict, name: str, pat: str) -> bool:
+    """The paper introduces the name: its title is or starts with it, or the abstract says we introduce/present/... it."""
+    title = (c.get("title") or "").strip()
+    if title.lower() == name.lower() or re.match(rf"^{pat}\s*[:\-–—,(]", title):
+        return True
+    ab = (c.get("abstract") or "")[:2500]
+    return bool(re.search(rf"\b(introduc|present|propos|releas|develop|train|call|nam|dub|creat)\w*\b[^.]{{0,160}}(?<![\w\-]){pat}(?![\w\-])", ab))
+
+
+def resolve_seed(m: Mission, t: dict, name: str, idx, budget: src.Budget) -> dict:
+    pat, rx, named = _name_rx(name)
+    rec = {"name": name, "track": t["id"], "id": None, "status": "topic", "tried": []}
+    if not named:
+        return rec  # a topic ("Episodic memory"), not a paper: scouting covers it
+    cands: dict[str, dict] = {}
+    try:
+        for c in src.arxiv_search(name, 25, order=""):
+            cands[c["id"]] = c
+        rec["tried"].append("arxiv")
+    except Exception:
+        pass
+    for c in idx.query(name, k=10):
+        cands.setdefault(c["id"], c)
+    rec["tried"].append("index")
+    hits = [c for c in cands.values() if _introduces(c, name, pat)]
+    if not hits and budget.take("seeds"):
+        rec["tried"].append("tavily")
+        try:
+            for h in src.tavily(f"{name} arxiv", 6, domains=["arxiv.org"]):
+                mm = src.ARXIV_ID.search(h["url"])
+                if not mm or mm.group(1) in cands:
+                    continue
+                meta = idx.get(mm.group(1)) or src.abs_meta(mm.group(1))
+                c = {"id": mm.group(1), "title": meta.get("title", ""), "abstract": meta.get("abstract", "")}
+                cands[c["id"]] = c
+                if _introduces(c, name, pat):
+                    hits.append(c)
+        except Exception:
+            pass
+    if not hits:
+        rec["status"] = "unresolved"
+        return rec
+    best = min(hits, key=lambda c: c["id"] if re.match(r"\d{4}\.", c["id"]) else "9999")  # arXiv ids sort by date
+    rec.update(id=best["id"], title=best.get("title", "")[:160], status="resolved", n_hits=len(hits))
+    return rec
+
+
 def resolve_seeds(m: Mission, idx, budget: src.Budget) -> list[dict]:
-    out = []
-    for t in m.plan["tracks"]:
-        for name in t.get("seeds", [])[:12]:
-            cands = {}
-            for c in idx.query(f"{name}. {t['name']}", k=6):
-                cands[c["id"]] = c["title"]
-            try:
-                for c in src.arxiv_search(re.sub(r"[^\w\s.-]", " ", name)[:80], 8):
-                    cands.setdefault(c["id"], c["title"])
-            except Exception:
-                pass
-            tried = ["index", "arxiv"]
-            pick = _pick_seed(name, t, cands)
-            if not pick and budget.take("seeds"):
-                tried.append("tavily")
-                try:
-                    hits = src.tavily(f"{name} arxiv paper", 5, domains=["arxiv.org"])
-                    ids = [mm.group(1) for h in hits for mm in [src.ARXIV_ID.search(h["url"])] if mm]
-                    for aid in ids[:3]:
-                        if aid not in cands:
-                            meta = idx.get(aid)
-                            cands[aid] = meta["title"] if meta else next((h["title"] for h in hits if aid in h["url"]), aid)
-                    pick = _pick_seed(name, t, cands)
-                except Exception:
-                    pass
-            rec = {"name": name, "track": t["id"], "id": pick, "status": "resolved" if pick else "unresolved", "tried": tried}
-            out.append(rec)
-            if pick and not m.seen(pick):
-                m.mark(pick, state="queued", track=t["id"], rel=3, prio=2.0, via="seed", why=f"seed: {name}", seed=name)
+    jobs = [(t, n) for t in m.plan["tracks"] for n in t.get("seeds", [])[:12]]
+    with ThreadPoolExecutor(4) as ex:
+        out = list(ex.map(lambda tn: resolve_seed(m, tn[0], tn[1], idx, budget), jobs))
+    picked = {(s["track"], s["name"]): s["id"] for s in out}
+    for r in list(m.reg.values()):  # papers queued under a seed name by an earlier, wrong match
+        if r.get("via") == "seed" and r.get("seed") and picked.get((r.get("track"), r["seed"]), "?") != r["id"]:
+            if (r.get("track"), r["seed"]) in picked:
+                m.mark(r["id"], via="seed-miss", seed=None, why=f"not the paper that introduced {r['seed']}")
+    for s in out:
+        if s["id"]:
+            if not m.seen(s["id"]) or m.reg[s["id"]].get("state") in ("cand", "cand_unindexed", "rejected"):
+                m.mark(s["id"], state="queued", track=s["track"], rel=3, prio=2.0, via="seed", why=f"seed: {s['name']}",
+                       seed=s["name"], title=s.get("title", ""))
+            else:
+                m.mark(s["id"], via="seed", seed=s["name"])
     write_json(m.p("memory/seeds.json"), out)
-    m.log("seeds", resolved=sum(1 for s in out if s["id"]), total=len(out))
+    m.log("seeds", resolved=sum(1 for s in out if s["id"]), total=len(out),
+          topics=sum(1 for s in out if s["status"] == "topic"))
     return out
-
-
-def _pick_seed(name: str, t: dict, cands: dict) -> str | None:
-    if not cands:
-        return None
-    ids = list(cands)[:14]
-    lines = "\n".join(f"{i}: {cands[i]}" for i in ids)
-    r = llm.chat_json("deep", _sys("You match a named paper or method to the arXiv paper that introduced it. Answer in JSON."),
-                      f"NAME: {name}\nCONTEXT: {t['name']}\nCANDIDATES (arXiv id: title):\n{lines}\n\n"
-                      "Which candidate is the original paper that introduced this name? match = its id, or \"none\" if no candidate is that paper.",
-                      OBJ(match=ENUM(*ids, "none"), why=STR), max_tokens=120)
-    return None if r.get("match") in (None, "none") else r["match"]
 
 
 # ---------------------------------------------------------------- scouting

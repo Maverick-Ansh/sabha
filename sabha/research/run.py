@@ -53,6 +53,7 @@ class Daemon:
         self.synth_draft_done = False
         self.synth_final_done = False
         self.final_reports_done = False
+        self.restart = False
         if os.environ.get("SABHA_S1"):  # e.g. SABHA_S1=reader: System-1 triage served by the 4B (no room for a 0.8B server)
             llm.OVERRIDE["s1"] = os.environ["SABHA_S1"]
 
@@ -134,11 +135,13 @@ class Daemon:
     def maintenance(self) -> None:
         m = self.m
         if not os.path.exists(m.p("memory/seeds.json")):
-            try:
-                A.resolve_seeds(m, self.idx, self.budget)
-            except Exception as e:
-                self.err(f"seeds: {e}")
-                traceback.print_exc()
+            def seeds():
+                try:
+                    A.resolve_seeds(m, self.idx, self.budget)
+                except Exception as e:
+                    self.err(f"seeds: {e}")
+                    traceback.print_exc()
+            threading.Thread(target=seeds, daemon=True).start()  # scouting starts at once, seeds resolve beside it
         while not self.stop:
             left = self.until - time.time()
             try:
@@ -253,6 +256,14 @@ class Daemon:
         for s in d.get("seed_ids", []) or []:
             aid = str(s.get("id", "")).strip()
             meta = self.idx.get(aid)
+            if aid and s.get("title_has"):  # the validator names a word the real title or abstract must contain
+                try:
+                    meta = src.abs_meta(aid)
+                except Exception:
+                    meta = None
+                if not meta or str(s["title_has"]).lower() not in (meta.get("title", "") + " " + meta.get("abstract", "")[:800]).lower():
+                    res.append(f"seed {aid} REFUSED: '{s['title_has']}' not in title/abstract")
+                    continue
             if aid and not (m.card(aid)):
                 m.mark(aid, state="queued", track=s.get("track"), rel=3, prio=2.5, via="seed", seed=s.get("name"),
                        title=(meta or {}).get("title", ""), why="validator seed")
@@ -300,6 +311,11 @@ class Daemon:
         if d.get("stop"):
             self.stop = True
             res.append("stop")
+        if d.get("restart"):  # pull new daemon code and exit 3; the bash loop on the box relaunches it
+            code = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            rc, out = sh("git pull -q --autostash && git log --oneline -1", code)
+            res.append(f"restart: code {out.strip()[-80:]}")
+            self.restart = self.stop = True
         write_json(m.p("state", "steering_applied.json"), {"seq": seq, "items": res, "ts": now()})
         m.log("steering", seq=seq, items=res)
 
@@ -458,7 +474,11 @@ class Daemon:
             self.status()
             self.digest()
             self.sync("final" if time.time() > self.until - 15 * 60 else "mission switch")
+            if self.restart:
+                print("[run] restart requested by steering", flush=True)
+                return 3
         print("[run] deadline reached", flush=True)
+        return 0
 
 
 def _ts(s) -> float:
@@ -500,7 +520,7 @@ def main() -> None:
         d.status()
         print("push:", d.sync("test paper"), flush=True)
         return
-    d.run()
+    raise SystemExit(d.run())
 
 
 if __name__ == "__main__":
