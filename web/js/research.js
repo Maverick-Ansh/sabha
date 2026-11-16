@@ -176,9 +176,10 @@ export function createResearch() {
     newBtn.hidden = !alive || !!(d.run && d.run.mission); // queued briefs are for a git-driven daemon; app runs start from the taste form
     const st = m.stats || {};
 
-    // hero
-    setText(eyebrowText, m.status === 'running' && alive ? 'research · live' : `research · ${alive ? m.status : 'daemon offline'}`);
-    liveDot.className = 'r-livedot ' + (alive && m.status === 'running' ? 'live' : alive ? 'idle' : 'off');
+    // hero (a mission that is done is finished, not offline: no daemon is expected any more)
+    const done = m.status === 'done';
+    setText(eyebrowText, m.status === 'running' && alive ? 'research · live' : done ? 'research · finished' : `research · ${alive ? m.status : 'daemon offline'}`);
+    liveDot.className = 'r-livedot ' + (alive && m.status === 'running' ? 'live' : alive || done ? 'idle' : 'off');
     setText(titleEl, m.title || m.id);
     setText(ledeEl, m.one_line || '');
     const working = d.agents.filter((a) => a.now && a.now.length).length;
@@ -186,7 +187,7 @@ export function createResearch() {
     if (d.workers && d.workers.total) bits.push(`${d.workers.busy} of ${d.workers.total} readers busy`);
     for (const t of d.team || []) bits.push(verb(t).toLowerCase());
     if (st.errors) bits.push(`${st.errors} errors`);
-    setText(pulseEl, alive ? bits.join(' · ') : 'The research daemon is not reporting.');
+    setText(pulseEl, alive ? bits.join(' · ') : done ? 'Finished. Read the synthesis, each agent\'s report and the cards, or download everything above.' : 'The research daemon is not reporting.');
     setNum(nCards, st.cards); setNum(nQueued, st.queued); setNum(nRate, st.per_hour);
     setText(nLeft, leftText(st.left_m));
     setText(rawEl, m.status_line || 'no status line yet');
@@ -203,7 +204,7 @@ export function createResearch() {
     }
 
     // banner
-    const dead = !alive;
+    const dead = !alive && !done;
     banner.hidden = !dead && !m.error;
     if (dead) setText(banner, `The research daemon has not reported${d.daemon.age_s != null ? ' for ' + fmtDur(d.daemon.age_s, true) : ''}. You can still read everything. Commands wait in its inbox until it runs.`);
     else if (m.error) setText(banner, m.error);
@@ -215,7 +216,7 @@ export function createResearch() {
       d.agents.forEach((a, i) => { const r = makeTile(a, i); tiles.set(a.id, r); grid.appendChild(r.el); });
       if (!d.agents.length) grid.appendChild(h('div.empty-note', null, m.status === 'waiting' ? 'This mission is waiting for the daemon to plan it.' : 'No agents yet: the daemon is planning the mission.'));
     }
-    for (const a of d.agents) patchTile(tiles.get(a.id), a, alive);
+    for (const a of d.agents) patchTile(tiles.get(a.id), a, alive || done);
     if (lastMission !== m.id) { lastMission = m.id; if (sheet && sheet.kind === 'agent') closeSheet(); }
 
     // standing instructions for everyone
