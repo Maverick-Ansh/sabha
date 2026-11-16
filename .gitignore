@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 node_modules/
 .cloudflared/
+web/_shots/

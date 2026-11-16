@@ -1,19 +1,21 @@
-// The orbit: a sun (mission pool), HUD rings, agent orbs and tool stations on <canvas>.
+// The orbit: a lotus seen from above. Each outer petal ends at a tool station, agents circle the
+// core as glossy orbs, and the mark sits on a glass disc in the middle. Drawn on <canvas>.
 // Light theme: glows use multiply / soft alpha so nothing washes out on paper.
 import { subscribe, getState, agents, agentById } from './store.js';
 import { rgbOf, rgba, hueOf, stationFor, STATIONS, truncate, statusLabel } from './format.js';
 import { h, showTip, hideTip } from './dom.js';
+import { lotusPaths } from './lotus.js';
 
 const TAU = Math.PI * 2;
 const MONO = '"Geist Mono", "Cascadia Mono", Consolas, monospace';
-const SERIF = '-apple-system, "SF Pro Display", Inter, "Segoe UI", system-ui, sans-serif';
+const SANS = '-apple-system, "SF Pro Text", Inter, "Segoe UI", system-ui, sans-serif';
 
 export function createOrbit(canvas, { onFocus } = {}) {
   const ctx = canvas.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
   const INK = rgbOf('ink'), PAPER = rgbOf('paper'), SUN = rgbOf('core-a'), CORAL = rgbOf('core-b');
   let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0, sunR = 30;
-  let active = false, raf = 0, last = 0, clock = 0, sunFlare = -9, layer = null;
+  let active = false, raf = 0, last = 0, clock = 0, sunFlare = -9, bloomAt = -1;
   const orbs = new Map();         // agent_id -> orb state
   const particles = [], ripples = [];
   const pulses = {};              // station -> { t, rgb }
@@ -47,39 +49,12 @@ export function createOrbit(canvas, { onFocus } = {}) {
     W = Math.max(10, box.width); H = Math.max(10, box.height);
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
-    const foot = H > 420 ? 74 : 56; // room for the stats row under the orbit
+    const foot = H > 420 ? 98 : 72; // room for the stats cards under the orbit
     cx = W / 2; cy = (H - foot) / 2 + 4;
     R = Math.max(60, Math.min((W - 112) / 2, (H - foot - 64) / 2)); // side room for station labels
-    sunR = Math.max(22, Math.min(44, R * 0.15));
-    buildLayer(); layoutOrbs();
+    sunR = Math.max(22, Math.min(40, R * 0.15));
+    layoutOrbs();
     if (!active) draw();
-  }
-
-  // Static HUD: rotating tick ring and degree labels, drawn once per resize.
-  function buildLayer() {
-    const size = Math.ceil((R + 4) * 2 * dpr);
-    layer = document.createElement('canvas');
-    layer.width = layer.height = size;
-    const c = layer.getContext('2d');
-    c.scale(dpr, dpr);
-    const o = R + 2;
-    c.translate(o, o);
-    for (let d = 0; d < 360; d += 2) {
-      const a = (d * Math.PI) / 180;
-      const len = d % 30 === 0 ? 11 : d % 10 === 0 ? 7 : 3.5;
-      c.strokeStyle = rgba(INK, d % 30 === 0 ? 0.26 : d % 10 === 0 ? 0.17 : 0.1);
-      c.lineWidth = d % 30 === 0 ? 1.1 : 0.8;
-      c.beginPath();
-      c.moveTo(Math.cos(a) * (R - len), Math.sin(a) * (R - len));
-      c.lineTo(Math.cos(a) * R, Math.sin(a) * R);
-      c.stroke();
-    }
-    c.fillStyle = rgba(INK, 0.26);
-    c.font = `500 8.5px ${MONO}`; c.textAlign = 'center'; c.textBaseline = 'middle';
-    for (let d = 0; d < 360; d += 30) {
-      const a = (d * Math.PI) / 180 - Math.PI / 2;
-      c.fillText(String(d).padStart(3, '0'), Math.cos(a) * (R - 21), Math.sin(a) * (R - 21));
-    }
   }
 
   // ---------- events -> motion ----------
@@ -164,39 +139,33 @@ export function createOrbit(canvas, { onFocus } = {}) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
-    // sunlight bloom + slow sweep
+    // soft light, then the lotus itself
     ctx.globalCompositeOperation = 'source-over';
-    glow(cx, cy, R * 1.05, SUN, 0.10 + Math.min(0.08, running * 0.02));
-    if (ctx.createConicGradient) {
-      const sweep = reduce.matches ? -0.6 : t * 0.26;
-      const g = ctx.createConicGradient(sweep, cx, cy);
-      g.addColorStop(0, rgba(SUN, 0)); g.addColorStop(0.075, rgba(SUN, 0.075)); g.addColorStop(0.095, rgba(SUN, 0)); g.addColorStop(1, rgba(SUN, 0));
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 0.97, 0, TAU); ctx.fill();
+    glow(cx, cy, R * 1.12, SUN, 0.09 + Math.min(0.08, running * 0.02));
+    glow(cx, cy - R * 0.2, R * 0.8, CORAL, 0.05);
+    const open = reduce.matches ? 1 : bloomAt < 0 ? 0 : Math.min(1, (t - bloomAt) / 1.9);
+    const N = STATIONS.length, step = TAU / N;
+    const drift = reduce.matches ? 0 : Math.sin(t * 0.11) * 0.05;
+    for (let i = 0; i < N; i++) {
+      const pl = pulses[STATIONS[i]], age = pl ? t - pl.t : 9;
+      petal(-Math.PI / 2 + i * step, R * 0.99, R * 0.47, 0.115, 0.045, open, i, t, age < 1.6 ? { rgb: pl.rgb, a: 0.26 * (1 - age / 1.6) } : null);
     }
+    for (let i = 0; i < N; i++) petal(-Math.PI / 2 + (i + 0.5) * step + drift, R * 0.6, R * 0.3, 0.12, 0.06, open, i + 3, t);
 
-    // rings
+    // the ring, with one slow glint running round it
     ctx.lineWidth = 1;
-    ctx.strokeStyle = rgba(INK, 0.13); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
-    ctx.setLineDash([2, 6]); ctx.strokeStyle = rgba(INK, 0.1);
-    ctx.beginPath(); ctx.arc(cx, cy, R * 0.9, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
-    ctx.strokeStyle = rgba(INK, 0.05);
-    ctx.beginPath(); ctx.moveTo(cx - R * 0.88, cy); ctx.lineTo(cx - sunR * 1.7, cy); ctx.moveTo(cx + sunR * 1.7, cy); ctx.lineTo(cx + R * 0.88, cy);
-    ctx.moveTo(cx, cy - R * 0.88); ctx.lineTo(cx, cy - sunR * 1.7); ctx.moveTo(cx, cy + sunR * 1.7); ctx.lineTo(cx, cy + R * 0.88); ctx.stroke();
-    if (layer) {
-      ctx.save(); ctx.translate(cx, cy); ctx.rotate(reduce.matches ? 0 : t * 0.012);
-      ctx.drawImage(layer, -(R + 2), -(R + 2), layer.width / dpr, layer.height / dpr); ctx.restore();
+    ctx.strokeStyle = rgba(SUN, 0.2 * open); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+    if (ctx.createConicGradient && open === 1) {
+      const sweep = reduce.matches ? -0.6 : t * 0.22;
+      const g = ctx.createConicGradient(sweep, cx, cy);
+      g.addColorStop(0, rgba(SUN, 0)); g.addColorStop(0.09, rgba(SUN, 0.55)); g.addColorStop(0.1, rgba(SUN, 0)); g.addColorStop(1, rgba(SUN, 0));
+      ctx.strokeStyle = g; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke(); ctx.lineWidth = 1;
     }
-    // inner tick ring around the sun, counter-rotating
-    ctx.strokeStyle = rgba(INK, 0.14); ctx.lineWidth = 0.8;
-    const ir = sunR * 1.5, rot = reduce.matches ? 0 : -t * 0.05;
-    ctx.beginPath();
-    for (let i = 0; i < 60; i++) { const a = rot + (i / 60) * TAU, l = i % 5 ? 2.5 : 5; ctx.moveTo(cx + Math.cos(a) * ir, cy + Math.sin(a) * ir); ctx.lineTo(cx + Math.cos(a) * (ir + l), cy + Math.sin(a) * (ir + l)); }
-    ctx.stroke();
 
     // agent orbit guides + trails
     for (const o of orbs.values()) {
       const dim = focus && focus !== o.id;
-      ctx.strokeStyle = rgba(o.rgb, dim ? 0.06 : focus === o.id ? 0.42 : 0.1 + o.energy * 0.12);
+      ctx.strokeStyle = rgba(o.rgb, dim ? 0.04 : focus === o.id ? 0.42 : 0.07 + o.energy * 0.14);
       ctx.lineWidth = focus === o.id ? 1.3 : 1;
       ctx.beginPath(); ctx.arc(cx, cy, o.radius, 0, TAU); ctx.stroke();
       if (o.energy > 0.05 && !dim) {
@@ -221,33 +190,49 @@ export function createOrbit(canvas, { onFocus } = {}) {
         ctx.beginPath(); ctx.arc(p.x, p.y, 6 + k * 18, 0, TAU); ctx.stroke();
         glow(p.x, p.y, 20, pl.rgb, 0.35 * (1 - k));
       }
-      ctx.fillStyle = age < 1.4 ? rgba(pl.rgb, 1) : rgba(PAPER, 1);
-      ctx.strokeStyle = rgba(INK, 0.32); ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(p.x, p.y, 4.2, 0, TAU); ctx.fill(); ctx.stroke();
-      const lx = cx + Math.cos(p.a) * (R + 17), ly = cy + Math.sin(p.a) * (R + 17);
-      ctx.font = `500 9.5px ${MONO}`;
+      ctx.globalAlpha = open;
+      ctx.fillStyle = age < 1.4 ? rgba(pl.rgb, 1) : 'rgba(255,255,255,1)';
+      ctx.strokeStyle = age < 1.4 ? rgba(pl.rgb, 1) : rgba(SUN, 0.55); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, TAU); ctx.fill(); ctx.stroke();
+      const lx = cx + Math.cos(p.a) * (R + 18), ly = cy + Math.sin(p.a) * (R + 18);
+      ctx.font = `600 10px ${SANS}`;
       ctx.textAlign = Math.abs(Math.cos(p.a)) < 0.3 ? 'center' : Math.cos(p.a) > 0 ? 'left' : 'right';
-      ctx.fillStyle = rgba(INK, age < 1.4 ? 0.75 : 0.42);
+      ctx.fillStyle = rgba(INK, age < 1.4 ? 0.85 : 0.55);
       spaced(name.toUpperCase(), lx, ly);
+      ctx.globalAlpha = 1;
     }
 
-    // sun core
+    // the core: the mark on a glass disc
     const flare = Math.max(0, 1 - (t - sunFlare) / 1.6);
     const breath = reduce.matches ? 0 : Math.sin(t * 1.3) * 0.5 + 0.5;
+    const dR = sunR * (1.12 + breath * 0.02);
     ctx.globalCompositeOperation = 'multiply';
-    glow(cx, cy, sunR * (2.6 + breath * 0.3 + flare * 1.6), SUN, 0.28 + flare * 0.3);
-    glow(cx, cy, sunR * 1.6, CORAL, 0.14 + flare * 0.15);
+    glow(cx, cy, sunR * (2.7 + breath * 0.35 + flare * 1.6), SUN, 0.22 + flare * 0.3);
+    glow(cx, cy, sunR * 1.8, CORAL, 0.12 + flare * 0.15);
     ctx.globalCompositeOperation = 'source-over';
-    const core = ctx.createRadialGradient(cx - sunR * 0.35, cy - sunR * 0.4, sunR * 0.05, cx, cy, sunR);
-    core.addColorStop(0, rgba([255, 247, 226], 1)); core.addColorStop(0.42, rgba(SUN, 1)); core.addColorStop(1, rgba(CORAL, 1));
-    ctx.fillStyle = core; ctx.beginPath(); ctx.arc(cx, cy, sunR, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(cx, cy, sunR * 0.8, 0, TAU); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.97)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `600 ${Math.round(sunR * 0.92)}px ${SERIF}`;
-    ctx.fillText(String(running), cx, cy + sunR * 0.06);
-    ctx.font = `500 9px ${MONO}`; ctx.fillStyle = rgba(INK, 0.45);
-    spaced('IN SESSION', cx, cy + sunR + 16);
+    for (let i = 0; i < 2; i++) { // two halos breathing out
+      const k = reduce.matches ? 0.5 : ((t * 0.22 + i * 0.5) % 1);
+      ctx.strokeStyle = rgba(SUN, 0.22 * (1 - k)); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, dR + 4 + k * sunR * 1.1, 0, TAU); ctx.stroke();
+    }
+    ctx.save();
+    ctx.shadowColor = rgba(SUN, 0.45); ctx.shadowBlur = 22; ctx.shadowOffsetY = 8;
+    const disc = ctx.createRadialGradient(cx, cy - dR * 0.4, dR * 0.1, cx, cy, dR);
+    disc.addColorStop(0, 'rgba(255,255,255,1)'); disc.addColorStop(1, 'rgba(250,247,255,.96)');
+    ctx.fillStyle = disc; ctx.beginPath(); ctx.arc(cx, cy, dR, 0, TAU); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, dR, 0, TAU); ctx.stroke();
+    const gs = dR * 1.34 * (1 + flare * 0.12), k32 = gs / 32;
+    ctx.save();
+    ctx.translate(cx - gs / 2, cy - gs / 2 - dR * 0.03); ctx.scale(k32, k32);
+    const lg = ctx.createLinearGradient(6, 4, 26, 26);
+    lg.addColorStop(0, rgba(CORAL, 1)); lg.addColorStop(1, rgba(SUN, 1));
+    ctx.fillStyle = lg;
+    for (const p of lotusPaths()) { ctx.globalAlpha = p.o; ctx.fill(p.path); }
+    ctx.restore(); ctx.globalAlpha = 1;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `600 9.5px ${SANS}`; ctx.fillStyle = rgba(SUN.map((c) => c * 0.72), 0.95);
+    spaced(running ? `${running} IN SESSION` : 'IN SESSION', cx, cy + dR + 17);
 
     // particles
     for (const p of particles) {
@@ -280,11 +265,14 @@ export function createOrbit(canvas, { onFocus } = {}) {
       ctx.globalCompositeOperation = 'multiply';
       glow(o.x, o.y, r * (2.4 + o.energy * 2.6 + o.kick), o.rgb, 0.16 + o.energy * 0.32);
       ctx.globalCompositeOperation = 'source-over';
-      const g = ctx.createRadialGradient(o.x - r * 0.35, o.y - r * 0.4, r * 0.08, o.x, o.y, r);
-      g.addColorStop(0, 'rgba(255,255,255,.96)');
-      g.addColorStop(0.4, rgba(o.rgb, 0.55 + o.energy * 0.45));
-      g.addColorStop(1, rgba(o.rgb.map((c) => c * 0.78), 0.7 + o.energy * 0.3));
+      const g = ctx.createRadialGradient(o.x - r * 0.36, o.y - r * 0.42, r * 0.06, o.x, o.y, r);
+      g.addColorStop(0, 'rgba(255,255,255,.97)');
+      g.addColorStop(0.42, rgba(o.rgb, 0.86 + o.energy * 0.14));
+      g.addColorStop(1, rgba(o.rgb.map((c) => c * 0.8), 0.96));
+      ctx.save();
+      ctx.shadowColor = rgba(o.rgb, 0.5); ctx.shadowBlur = 10; ctx.shadowOffsetY = 4;
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, TAU); ctx.fill();
+      ctx.restore();
       const flag = needs(o.id);
       if (flag) {
         ctx.setLineDash([3, 4]); ctx.lineDashOffset = -t * 8; ctx.strokeStyle = rgba(SUN, 0.95); ctx.lineWidth = 1.5;
@@ -299,6 +287,26 @@ export function createOrbit(canvas, { onFocus } = {}) {
       if ((o.energy > 0.5 || focus === o.id) && act && act.now && !dim) label(o, truncate(act.now, 38));
       ctx.globalAlpha = 1;
     }
+  }
+  // One petal from the core out to `tip`, `half` wide at its belly. `open` (0..1) unfolds it; `lit` tints it.
+  function petal(angle, tip, half, a0, a1, open, i, t, lit) {
+    const k = Math.max(0, Math.min(1, open * 1.7 - i * 0.07));
+    if (k <= 0) return;
+    const e = 1 - Math.pow(1 - k, 3);
+    const sway = reduce.matches ? 1 : 1 + Math.sin(t * 0.8 + i * 1.7) * 0.014;
+    const r0 = sunR * 0.9, r1 = r0 + (tip - r0) * e * sway, w = half * (0.35 + 0.65 * e), L = r1 - r0;
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(r0, 0);
+    ctx.bezierCurveTo(r0 + L * 0.3, -w, r0 + L * 0.74, -w * 0.82, r1, 0);
+    ctx.bezierCurveTo(r0 + L * 0.74, w * 0.82, r0 + L * 0.3, w, r0, 0);
+    const g = ctx.createLinearGradient(r0, 0, r1, 0);
+    g.addColorStop(0, rgba(SUN, a0 * e)); g.addColorStop(1, rgba(CORAL, a1 * e));
+    ctx.fillStyle = g; ctx.fill();
+    if (lit) { ctx.fillStyle = rgba(lit.rgb, lit.a); ctx.fill(); }
+    ctx.strokeStyle = `rgba(255,255,255,${0.7 * e})`; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
   }
   function spaced(text, x, y) {
     if ('letterSpacing' in ctx) { ctx.letterSpacing = '1.4px'; ctx.fillText(text, x, y); ctx.letterSpacing = '0px'; }
@@ -335,7 +343,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
       o.dir = 1;
       if (!reduce.matches) o.angle = (o.angle + o.speed * (1 + o.energy * 0.8) * dt) % TAU;
       const breath = reduce.matches ? 0 : (Math.sin(clock * 2.2 + o.radius) * 0.5 + 0.5) * o.energy;
-      o.r = 5 + o.energy * 3.5 + breath * 1.4 + o.kick * 1.6;
+      o.r = 6.5 + o.energy * 3 + breath * 1.4 + o.kick * 1.6;
       o.x = cx + Math.cos(o.angle) * o.radius; o.y = cy + Math.sin(o.angle) * o.radius;
     }
     for (let i = particles.length - 1; i >= 0; i--) {
@@ -345,7 +353,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
     }
     while (ripples.length && clock - ripples[0].t > 2) ripples.shift();
   }
-  function busy() { return particles.length || ripples.length || Array.from(orbs.values()).some((o) => o.energy > 0.05); }
+  function busy() { return (bloomAt >= 0 && clock - bloomAt < 2.2) || particles.length || ripples.length || Array.from(orbs.values()).some((o) => o.energy > 0.05); }
   function frame(ts) {
     raf = requestAnimationFrame(frame);
     const minGap = reduce.matches ? 160 : busy() ? 24 : 48; // ~40 fps when busy, ~20 idle
@@ -359,7 +367,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
     if (on === active) return;
     active = on;
     cancelAnimationFrame(raf); last = 0;
-    if (on) raf = requestAnimationFrame(frame);
+    if (on) { if (bloomAt < 0) bloomAt = clock; raf = requestAnimationFrame(frame); }
   }
 
   // ---------- pointer ----------
@@ -396,7 +404,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
 
   const ro = new ResizeObserver(() => resize());
   ro.observe(canvas.parentElement);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { buildLayer(); if (!active) draw(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (!active) draw(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) setActive(false); else if (wantActive) setActive(true); });
   let wantActive = false;
 

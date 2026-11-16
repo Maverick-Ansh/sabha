@@ -112,7 +112,8 @@ export function icon(name, size = 16, sw = 1.7) {
 
 // Auto-growing textarea.
 export function autogrow(ta, max = 220) {
-  const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.min(max, ta.scrollHeight + 2) + 'px'; };
+  // scrollHeight is 0 while the view is hidden: keep the natural one-row height then, never a 2px sliver
+  const fit = () => { ta.style.height = 'auto'; const sh = ta.scrollHeight; if (sh) ta.style.height = Math.min(max, sh + 2) + 'px'; };
   ta.addEventListener('input', fit);
   requestAnimationFrame(fit);
   return fit;

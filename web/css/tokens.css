@@ -1,31 +1,33 @@
-/* Sabha design tokens: "aurora glass".
-   Apple-plain surfaces (cool grey page, white glass cards, near-black ink, hairlines) with one
-   futuristic accent, a blue to violet aurora, kept for the core orb, primary actions and verdicts.
+/* Sabha design tokens: "Lotus Minimal".
+   A lavender-white page, frosted white cards, deep indigo ink and violet-tinted hairlines. The one
+   accent is the lotus: violet into pink, kept for the mark, the core of the orbit, the active tab and
+   primary actions (those use the deeper --brand-ink so white text stays readable). Agents keep their own clear hues.
    Every colour in the app comes from here. JS reads the *-rgb triplets for canvas work. */
 :root {
   /* page and ink */
-  --paper: #F5F5F7;
-  --paper-2: #ECECF0;
-  --paper-rgb: 245, 245, 247;
-  --card: rgba(255, 255, 255, .68);
+  --paper: #F6F4FC;
+  --paper-2: #EDE9F8;
+  --paper-rgb: 246, 244, 252;
+  --card: rgba(255, 255, 255, .62);
   --card-solid: #FFFFFF;
-  --card-strong: rgba(255, 255, 255, .88);
-  --ink: #1D1D1F;
-  --ink-2: #6E6E73;
-  --ink-3: #8E8E93;
-  --ink-rgb: 29, 29, 31;
-  --line: rgba(0, 0, 0, .09);
-  --line-2: rgba(0, 0, 0, .055);
-  --wash: rgba(0, 0, 0, .04);
+  --card-strong: rgba(255, 255, 255, .86);
+  --glass-edge: rgba(255, 255, 255, .9);
+  --ink: #211D33;
+  --ink-2: #6A6580;
+  --ink-3: #857F9C;
+  --ink-rgb: 33, 29, 51;
+  --line: rgba(76, 58, 140, .13);
+  --line-2: rgba(76, 58, 140, .08);
+  --wash: rgba(76, 58, 140, .055);
   --white: #FFFFFF;
 
-  /* agent hues (system colours): strong, rgb triplet, deep (legible as text on the page) */
+  /* agent hues: strong, rgb triplet, deep (legible as text on the page) */
   --sun: #FF9F0A;   --sun-rgb: 255, 159, 10;   --sun-deep: #A85600;
-  --coral: #FF453A; --coral-rgb: 255, 69, 58;  --coral-deep: #C4281D;
-  --mint: #30C25B;  --mint-rgb: 48, 194, 91;   --mint-deep: #1B7F3B;
-  --sky: #0A84FF;   --sky-rgb: 10, 132, 255;   --sky-deep: #0062CC;
-  --lilac: #6E6BF2; --lilac-rgb: 110, 107, 242; --lilac-deep: #4543C4;
-  --rose: #FF375F;  --rose-rgb: 255, 55, 95;   --rose-deep: #C81E48;
+  --coral: #FF5A52; --coral-rgb: 255, 90, 82;  --coral-deep: #C4281D;
+  --mint: #34C26A;  --mint-rgb: 52, 194, 106;  --mint-deep: #1B7F3B;
+  --sky: #3B8BFF;   --sky-rgb: 59, 139, 255;   --sky-deep: #1D63D8;
+  --lilac: #8B7CF6; --lilac-rgb: 139, 124, 246; --lilac-deep: #5B4BD6;
+  --rose: #F0569A;  --rose-rgb: 240, 86, 154;  --rose-deep: #C2286E;
 
   --sun-soft: rgba(var(--sun-rgb), .14);     --sun-glow: rgba(var(--sun-rgb), .42);
   --coral-soft: rgba(var(--coral-rgb), .11); --coral-glow: rgba(var(--coral-rgb), .40);
@@ -34,11 +36,13 @@
   --lilac-soft: rgba(var(--lilac-rgb), .12); --lilac-glow: rgba(var(--lilac-rgb), .40);
   --rose-soft: rgba(var(--rose-rgb), .11);   --rose-glow: rgba(var(--rose-rgb), .40);
 
-  /* the core: orb, primary buttons, verdict frame */
-  --core-a: #0A84FF; --core-a-rgb: 10, 132, 255;
-  --core-b: #BF5AF2; --core-b-rgb: 191, 90, 242;
-  --action: #0071E3;
-  --brand: linear-gradient(135deg, var(--core-a) 0%, #5E5CE6 52%, var(--core-b) 100%);
+  /* the lotus: mark, orbit core, active tab, primary buttons, verdict frame */
+  --core-a: #8B7CF6; --core-a-rgb: 139, 124, 246;
+  --core-b: #E58AD0; --core-b-rgb: 229, 138, 208;
+  --action: #6553E0;
+  --brand: linear-gradient(135deg, #9D8FFA 0%, var(--core-a) 46%, #C583E6 100%);
+  /* fills that carry white text: every stop is at least 4.8:1 against white */
+  --brand-ink: linear-gradient(135deg, #6F5CE8 0%, #5B4BD6 46%, #9A4FC8 100%);
   --brand-soft: linear-gradient(135deg, rgba(var(--core-a-rgb), .12), rgba(var(--core-b-rgb), .12));
 
   /* status */
@@ -48,10 +52,10 @@
   --st-done: var(--ink);
   --st-queued: var(--ink-3);
 
-  /* background aurora */
-  --wash-peach: rgba(var(--core-b-rgb), .13);
-  --wash-sky: rgba(var(--core-a-rgb), .14);
-  --wash-mint: transparent;
+  /* background mist */
+  --wash-peach: rgba(var(--core-b-rgb), .16);
+  --wash-sky: rgba(var(--core-a-rgb), .17);
+  --wash-mint: rgba(255, 255, 255, .7);
   --dot-grid: transparent;
 
   /* type */
@@ -60,23 +64,24 @@
   --f-mono: "SF Mono", ui-monospace, "Geist Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
 
   /* shape */
-  --r-card: 20px;
+  --r-card: 22px;
   --r-sm: 12px;
   --r-pill: 999px;
-  --shadow: 0 0 0 .5px rgba(0, 0, 0, .05), 0 1px 1px rgba(0, 0, 0, .03), 0 14px 34px -16px rgba(0, 0, 0, .16);
-  --shadow-sm: 0 0 0 .5px rgba(0, 0, 0, .05), 0 5px 14px -8px rgba(0, 0, 0, .16);
-  --shadow-lg: 0 0 0 .5px rgba(0, 0, 0, .06), 0 32px 70px -28px rgba(0, 0, 0, .3), 0 4px 12px -6px rgba(0, 0, 0, .08);
-  --blur: blur(24px) saturate(1.8);
+  --shadow: 0 0 0 .5px rgba(76, 58, 140, .07), 0 1px 1px rgba(76, 58, 140, .04), 0 18px 40px -20px rgba(76, 58, 140, .28);
+  --shadow-sm: 0 0 0 .5px rgba(76, 58, 140, .07), 0 6px 16px -9px rgba(76, 58, 140, .3);
+  --shadow-lg: 0 0 0 .5px rgba(76, 58, 140, .08), 0 34px 74px -28px rgba(60, 40, 130, .42), 0 4px 12px -6px rgba(60, 40, 130, .1);
+  --blur: blur(26px) saturate(1.7);
 
   /* motion */
   --ease: cubic-bezier(.2, .8, .2, 1);
+  --spring: cubic-bezier(.34, 1.4, .5, 1);
   --t-fast: 180ms;
-  --t: 220ms;
-  --t-slow: 320ms;
+  --t: 240ms;
+  --t-slow: 360ms;
 
   /* layout */
-  --topbar-h: 56px;
-  --roster-w: 260px;
+  --topbar-h: 60px;
+  --roster-w: 264px;
   --stream-w: 420px;
-  --timeline-h: 120px;
+  --timeline-h: 112px;
 }

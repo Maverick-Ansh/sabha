@@ -1,27 +1,13 @@
-// Top bar: wordmark + sun glyph, mode switch, session clock, GPU chips, mute, crew, connection dot.
+// Top bar: wordmark + lotus mark, mode switch, session clock, GPU chips, mute, crew, connection dot.
 import { h, icon, setText, clear } from './dom.js';
 import { subscribe, getState, sessionWindow } from './store.js';
 import { fmtDur, serverNow } from './format.js';
 import { isMuted, setMuted } from './notify.js';
+import { lotusGlyph } from './lotus.js';
 
 export const MODES = ['research', 'watch', 'talk', 'work', 'council'];
 const LABEL = { research: 'Research', watch: 'Watch', talk: 'Talk', work: 'Work', council: 'Council' };
 const TAB_ICON = { research: 'flask', watch: 'orbit', talk: 'chat', work: 'board', council: 'crew' };
-
-function sunGlyph() {
-  const ticks = [];
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    const r0 = i % 3 ? 9.2 : 8.6, r1 = 10.8;
-    ticks.push(h('line', { x1: 12 + Math.cos(a) * r0, y1: 12 + Math.sin(a) * r0, x2: 12 + Math.cos(a) * r1, y2: 12 + Math.sin(a) * r1 }));
-  }
-  return h('svg', { class: 'sun-glyph', width: 26, height: 26, viewBox: '0 0 24 24', 'aria-hidden': 'true' },
-    h('defs', null, h('linearGradient', { id: 'sabhaSunGrad', x1: '0', y1: '0', x2: '1', y2: '1' },
-      h('stop', { offset: '0', style: 'stop-color: var(--core-a)' }), h('stop', { offset: '1', style: 'stop-color: var(--core-b)' }))),
-    h('g', { class: 'sun-ticks' }, ticks),
-    h('circle', { cx: 12, cy: 12, r: 6.4, class: 'sun-ring' }),
-    h('circle', { cx: 12, cy: 12, r: 4.6, fill: 'url(#sabhaSunGrad)' }));
-}
 
 function shortGpu(name) {
   const s = String(name || 'GPU').replace(/NVIDIA|Tesla|GeForce|Corporation/gi, '').trim();
@@ -55,7 +41,7 @@ export function createTopbar({ onMode, onCrew, onPalette }) {
 
   const el = h('header.topbar', null,
     h('div.tb-left', null,
-      h('a.wordmark', { href: '#/watch', 'aria-label': 'Sabha' }, sunGlyph(), h('span.wm-text', null, 'sabha')),
+      h('a.wordmark', { href: '#/watch', 'aria-label': 'Sabha' }, lotusGlyph(28), h('span.wm-text', null, 'Sabha')),
       demo),
     h('div.tb-center', null, seg),
     h('div.tb-right', null,

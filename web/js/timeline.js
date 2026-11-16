@@ -145,7 +145,7 @@ export function createTimeline({ onJump } = {}) {
     }
     const xnow = X(now);
     if (xnow > gutter && xnow < W) {
-      const sun = rgbOf('sun');
+      const sun = rgbOf('core-a');
       ctx.fillStyle = rgba(sun, 0.95); ctx.fillRect(Math.round(xnow), AXIS - 2, 1.5, H - AXIS + 2);
       ctx.beginPath(); ctx.arc(xnow + 0.75, AXIS - 3, 3, 0, Math.PI * 2); ctx.fill();
     }

@@ -15,6 +15,21 @@ function agentStatus(agentId) {
   if (last && last.status === 'failed') return 'failed';
   return 'idle';
 }
+// A stat rolls to its new value instead of jumping.
+const calm = matchMedia('(prefers-reduced-motion: reduce)');
+function countTo(el, to) {
+  const from = el._n || 0;
+  el._n = to;
+  cancelAnimationFrame(el._raf);
+  if (from === to || calm.matches || document.hidden) { setText(el, fmtNum(to)); return; }
+  const t0 = performance.now();
+  const step = (ts) => {
+    const k = Math.min(1, Math.max(0, (ts - t0) / 700)), e = 1 - Math.pow(1 - k, 3);
+    setText(el, fmtNum(Math.round(from + (to - from) * e)));
+    if (k < 1) el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
 const STATUS_WORD = { needs: 'needs you', running: 'in session', failed: 'failed', idle: 'idle' };
 
 export function createWatch() {
@@ -24,7 +39,7 @@ export function createWatch() {
 
   const canvas = h('canvas.orbit-canvas', { 'aria-label': 'Agents in orbit around the mission pool', role: 'img' });
   const stat = (label) => { const v = h('div.stat-v.display.italic', null, '0'); return { el: h('div.stat', null, v, h('div.micro', null, label)), v }; };
-  const stats = { running: stat('missions running'), steps: stat('steps'), tools: stat('tool calls'), tokens: stat('tokens') };
+  const stats = { running: stat('Running'), steps: stat('Steps'), tools: stat('Tool calls'), tokens: stat('Tokens') };
   const focusChip = h('button.chip.focus-chip', { hidden: true, onclick: () => focus(null) });
   const empty = h('div.stage-empty', { hidden: true },
     h('div.display.italic.empty-line', null, 'The sabha is quiet. Give it something to do.'),
@@ -105,10 +120,10 @@ export function createWatch() {
     const ms = missions().filter((m) => !f || m.agent_id === f);
     let steps = 0, tools = 0, tok = 0;
     for (const m of ms) { const s = m.stats || {}; steps += s.steps || 0; tools += s.tool_calls || 0; tok += (s.prompt_tokens || 0) + (s.completion_tokens || 0); }
-    setText(stats.running.v, String(ms.filter((m) => tone(m.status) === 'running').length));
-    setText(stats.steps.v, fmtNum(steps));
-    setText(stats.tools.v, fmtNum(tools));
-    setText(stats.tokens.v, fmtNum(tok));
+    countTo(stats.running.v, ms.filter((m) => tone(m.status) === 'running').length);
+    countTo(stats.steps.v, steps);
+    countTo(stats.tools.v, tools);
+    countTo(stats.tokens.v, tok);
     empty.hidden = missions().length > 0 || !getState().ready;
   }
   function renderFocus() {

@@ -16,6 +16,17 @@ import { openCrew } from './crew.js';
 import { openPalette } from './palette.js';
 import { initNotify, setOpenMission } from './notify.js';
 import { nav } from './nav.js';
+import { lotusGlyph } from './lotus.js';
+
+// The mist behind the app leans a little away from the pointer (theme.css reads --mx / --my).
+{
+  const back = document.querySelector('.backdrop');
+  let mx = 0, my = 0, queued = 0;
+  if (back && matchMedia('(pointer: fine)').matches) addEventListener('pointermove', (e) => {
+    mx = e.clientX / innerWidth - 0.5; my = e.clientY / innerHeight - 0.5;
+    if (!queued) queued = requestAnimationFrame(() => { queued = 0; back.style.setProperty('--mx', mx.toFixed(3)); back.style.setProperty('--my', my.toFixed(3)); });
+  }, { passive: true });
+}
 
 const root = document.getElementById('app');
 let helloHead = 0, helloSeen = false, pongSeen = false, conn = null, gateEl = null, mode = null;
@@ -80,7 +91,7 @@ function showGate() {
   const err = h('div.err');
   const btn = h('button.btn.brand', { type: 'submit' }, 'Take a seat', icon('send', 14));
   gateEl = h('div.gate', null, h('div.gate-card.card', null,
-    h('div.gate-sun', { 'aria-hidden': 'true' }),
+    h('div.gate-lotus', { 'aria-hidden': 'true' }, lotusGlyph(54)),
     h('h1', null, 'The council is in session.'),
     h('p', null, 'Paste your hub link or token to come in. The hub prints the link when it starts.'),
     h('form', { onsubmit: async (e) => {
