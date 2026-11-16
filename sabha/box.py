@@ -260,7 +260,8 @@ def gpus() -> list[dict]:
 
 
 def layout(g: list[dict]) -> tuple[list[dict], str]:
-    """(models to serve, problem). Measured on Kaggle 2x T4: the 9B AWQ needs a GPU to itself."""
+    """(models to serve, problem). Measured on Kaggle 2x T4: the 9B AWQ needs a GPU to itself. Context 32768 for both:
+    a Work run (dsh system prompt + fetched pages) filled a 20480 window by its third step; both servers start at 32768."""
     if os.environ.get("SABHA_MODELS", "1") == "0":
         return [], ""
     if not g:
@@ -273,11 +274,11 @@ def layout(g: list[dict]) -> tuple[list[dict], str]:
     if not ok:
         return [], f"The GPU has {g[0]['mem_mb']} MB of memory; the models need a 15 GB card (a T4 or larger)."
     reader = {"role": "reader", "name": "Qwen3.5-4B (reader)", "hf": os.environ.get("SABHA_READER_MODEL") or "Qwen/Qwen3.5-4B",
-              "port": 8002, "util": "0.85", "ctx": int(os.environ.get("SABHA_READER_CTX") or 20480), "seqs": 8}
+              "port": 8002, "util": "0.85", "ctx": int(os.environ.get("SABHA_READER_CTX") or 32768), "seqs": 8}
     if len(ok) >= 2:
         deep = {"role": "deep", "name": "Qwen3.5-9B 4-bit (deep)",
                 "hf": os.environ.get("SABHA_DEEP_MODEL") or "cyankiwi/Qwen3.5-9B-AWQ-4bit", "gpu": ok[0]["index"],
-                "port": 8001, "util": "0.90", "ctx": int(os.environ.get("SABHA_DEEP_CTX") or 16384), "seqs": 8}
+                "port": 8001, "util": "0.90", "ctx": int(os.environ.get("SABHA_DEEP_CTX") or 32768), "seqs": 8}
         reader["gpu"] = ok[1]["index"]
         return [deep, reader], ""
     reader["gpu"] = ok[0]["index"]
