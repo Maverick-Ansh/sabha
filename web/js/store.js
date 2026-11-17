@@ -175,7 +175,10 @@ export function remove(kind, id) {
 // Helpers
 export const agents = () => Object.values(state.agents);
 export const missions = () => Object.values(state.missions);
-export const agentById = (id) => state.agents[id];
+// research agents ('r:<track>', 'r:team') are not crew: watch.js registers their names and hues for the stream
+const researchAgents = {};
+export function setResearchAgents(map) { for (const k in researchAgents) delete researchAgents[k]; Object.assign(researchAgents, map); }
+export const agentById = (id) => state.agents[id] || researchAgents[id];
 export function defaultAgent() {
   const list = agents();
   return list.find((a) => /^lead$/i.test(a.name)) || list[0] || null;

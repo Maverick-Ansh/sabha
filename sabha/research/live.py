@@ -65,6 +65,20 @@ def key() -> str | None:
     return getattr(_tl, "key", None)
 
 
+def adopt(k: str | None) -> None:
+    """A helper thread (a pool worker mapping sections) works for this slot: trace.py reads its context from here."""
+    _tl.key = k
+
+
+def current() -> dict:
+    """A copy of the calling thread's slot ({} without one): track, paper, title, step."""
+    k = key()
+    if not k:
+        return {}
+    with _lock:
+        return dict(_slots.get(k) or {})
+
+
 def begin(_key: str | None = None, **fields) -> None:
     """Start a new job in the slot: replaces everything the slot said before."""
     k = _key or key()

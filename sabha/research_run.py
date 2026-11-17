@@ -362,7 +362,7 @@ class Runner:
             for dirpath, dirnames, filenames in os.walk(root):
                 dirnames[:] = [d for d in dirnames if d not in SKIP_IN_ZIP]
                 for name in sorted(filenames):
-                    if name.endswith(".tmp") or name == "live.json":
+                    if name.endswith(".tmp") or name in ("live.json", "trace.jsonl"):  # the trace is for the live view
                         continue
                     full = os.path.join(dirpath, name)
                     try:

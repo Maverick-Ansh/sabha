@@ -23,7 +23,7 @@ import os
 import re
 import time
 
-from . import live, llm, longmem
+from . import live, llm, longmem, trace
 from .agents import ARR, ENUM, OBJ, STR, _card_brief, _strip_unknown_cites, _sys, rank_cards, render_digest
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
@@ -454,5 +454,8 @@ def turnover(m: Mission, w: dict, until: float, end_margin: float, home: str, tr
     save(m, nxt)
     render_report(m, final=False)
     m.log("wave", n=int(w["n"]), cards=n_cards, headline=headline, final=final, next=None if final else nxt["n"])
+    trace.emit("text", f"Wave {int(w['n'])} closed ({n_cards} papers): {headline}"
+               + ("" if final else f" Context cleared; wave {nxt['n']} starts. Plan: {'; '.join(nxt.get('plan_changes') or [])}"),
+               track="team", step="wave")
     append(m.p("state", "notify.jsonl"), {"kind": "wave", "n": int(w["n"]), "cards": n_cards, "headline": headline, "final": final})
     return nxt

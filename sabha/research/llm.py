@@ -15,6 +15,8 @@ import time
 import urllib.error
 import urllib.request
 
+from . import trace
+
 # role: (served name, port, max concurrent, context length)
 ROLES = {"s1": ("s1", 8003, 16, 4096), "deep": ("deep", 8001, 4, 16384), "reader": ("reader", 8002, 6, 20480)}
 for _r, (_n, _p, _c, _ctx) in list(ROLES.items()):  # a model switched in the app may have a smaller window (SABHA_CTX_DEEP=...)
@@ -170,7 +172,10 @@ def chat(role: str, system: str, user: str, max_tokens: int = 800, schema: dict 
             last = f"{r} output looped"
             temperature = min(temperature + 0.2, 0.9)
             continue
+        trace.emit("think", text, role=r, secs=round(time.time() - t0, 1),
+                   tok=d.get("usage", {}).get("completion_tokens", 0))
         return text
+    trace.emit("error", f"{role} model gave no answer: {last[:300]}")
     raise LLMError(last or "no answer")
 
 

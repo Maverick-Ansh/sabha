@@ -32,6 +32,7 @@ from .research_api import Research, add_routes as add_research_routes
 from .recall import Recall
 from .research_run import Runner, read_boot
 from .notify import Notifier
+from .research_feed import ResearchFeed
 from . import catalog
 from .research import longmem
 from .settings import Settings, Taste
@@ -101,6 +102,7 @@ class Hub:
         self.runner = Runner(self, cfg.research_repo)
         self.public_link = ""
         self.notifier = Notifier(self)  # phone push, Telegram, WhatsApp, email, calls (sabha/notify.py)
+        self.feed = ResearchFeed(self)  # research work as live run events (sabha/research_feed.py)
         self.longmem_home = longmem.home_for(cfg.research_repo)
         self.sockets: set[web.WebSocketResponse] = set()
 
@@ -116,10 +118,12 @@ class Hub:
         self.models.start()
         self.telemetry.start()
         self.notifier.start()
+        self.feed.start()
         self.store.save_now()
 
     async def close(self) -> None:
         await self.notifier.close()
+        await self.feed.close()
         await self.missions.close()
         await self.councils.close()
         await self.talk.close()

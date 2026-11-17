@@ -1,6 +1,6 @@
 // Watch mode: roster | orbit stage | stream, with the session timeline along the bottom.
 import { h, icon, setText, clear } from './dom.js';
-import { subscribe, getState, agents, missions, setUI, agentRate } from './store.js';
+import { subscribe, getState, agents, missions, setUI, agentRate, setResearchAgents } from './store.js';
 import { hueOf, fmtNum, truncate, tone } from './format.js';
 import { createOrbit } from './orbit.js';
 import { createStream } from './stream.js';
@@ -82,15 +82,23 @@ export function createWatch() {
   const orbit = createOrbit(canvas, { onFocus: (id) => focus(id), onResearch: () => nav.go('research') });
 
   // ---------- research (polled) ----------
+  let rTlAt = 0;
   async function pollResearch() {
     if (!getState().system || !getState().system.research) { rData = null; paintResearch(); return; }
     try { rData = await get('/api/research'); } catch { rData = null; }
     paintResearch();
+    if (Date.now() - rTlAt > 10000) {  // the timeline's research lanes: every 10 s is plenty
+      rTlAt = Date.now();
+      try { timeline.setResearch(await get('/api/research/timeline')); } catch { /* an older hub: no lanes */ }
+    }
   }
   function paintResearch() {
     const d = rData;
     const running = !!(d && d.run && d.run.running && d.mission);
     const list = running ? (d.agents || []).filter((a) => !a.retired) : [];
+    const reg = { 'r:team': { id: 'r:team', name: 'Research', hue: 'lilac', role: 'the research run' } };
+    for (const a of (d && d.agents) || []) reg['r:' + a.id] = { id: 'r:' + a.id, name: a.name.replace(/^Track \d+:\s*/, ''), hue: a.hue, role: 'research' };
+    setResearchAgents(reg);
     rBusy = list.filter((a) => a.now && a.now.length).length;
     orbit.setResearch(list.map((a) => ({ id: 'r:' + a.id, name: a.name, hue: a.hue, working: !!(a.now && a.now.length),
       now: rNow(a), station: rStation((a.now || [])[0]) })));

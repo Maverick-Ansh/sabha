@@ -12,7 +12,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import live, llm, sources as src
+from . import live, llm, sources as src, trace
 from .memory import MEMORY_LESSON, Mission, append, base_id, now, packet, read_json, write, write_json
 
 # ---------------------------------------------------------------- schema helpers
@@ -322,6 +322,7 @@ def scout(m: Mission, tid: str, idx, budget: src.Budget, steer: dict) -> dict:
             continue
         via = q.get("via", "index")
         live.set(query=text, via=via)
+        trace.emit("call", tool=f"{via}_search", input=text, track=tid)
         hits = []
         try:
             hits = idx.query(text, k=30)
@@ -358,6 +359,7 @@ def scout(m: Mission, tid: str, idx, budget: src.Budget, steer: dict) -> dict:
                    rel=c.get("rel", 0), cos=round(c.get("cos", 0), 3), prio=priority(c, boost), via=via,
                    qid=q.get("q", ""), title=c["title"][:200], kind=c.get("kind"),
                    created=c.get("created") or c.get("submitted", ""), why="triage")
+        trace.emit("result", f"{len(hits)} hits, {len(fresh)} new, {n_rel2} worth reading", tool=f"{via}_search", track=tid)
         append(m.p("tracks", tid, "queries.jsonl"), {"qid": f"{tid}.s{len(past) + 1}", "track": tid, "q": q.get("q", ""),
                                                     "text": text, "via": via, "n_hits": len(hits), "n_new": len(fresh), "n_rel2": n_rel2})
         past.append({"text": text, "via": via})
@@ -442,12 +444,16 @@ def read_paper(m: Mission, aid: str, idx, budget: src.Budget, steer: dict, max_c
     tid = reg.get("track") or m.track_ids()[0]
     m.mark(aid, state="reading")
     t0 = time.time()
+    trace.emit("call", tool="fetch_paper", input=f"arXiv {aid}", paper=aid)
     try:
         meta = src.abs_meta(aid)
         paper = src.paper_text(aid)
     except Exception as e:
         m.mark(aid, state="failed", why=f"fetch: {str(e)[:160]}")
+        trace.emit("result", f"could not fetch: {str(e)[:160]}", tool="fetch_paper", paper=aid, status="error")
         return "failed"
+    trace.emit("result", f"{meta['title']} · {len(paper['sections'])} sections, {len(paper['full'])} characters",
+               tool="fetch_paper", paper=aid, title=meta["title"])
     full = paper["full"]
     fullnorm = src.norm(full)
     tlist = "\n".join(f"{t['id']}: {t['name']}. {t['one_line']}" for t in m.plan["tracks"])
@@ -466,6 +472,7 @@ def read_paper(m: Mission, aid: str, idx, budget: src.Budget, steer: dict, max_c
     if not gate.get("keep") and reg.get("via") != "seed" and not tier_b:
         write_json(m.p("rejected", aid + ".json"), {"id": aid, "title": meta["title"], "gate": gate, "ts": now()})
         m.mark(aid, state="rejected", why="gate: " + gate.get("why", "")[:200])
+        trace.emit("text", f"Skipped \"{meta['title']}\": {gate.get('why', '')[:300]}", paper=aid, title=meta["title"])
         return "rejected"
     if gate.get("track") in m.track_ids():
         tid = gate["track"]
@@ -483,6 +490,7 @@ quote: copy 8 to 25 words EXACTLY from the text below (it is checked by a progra
 At most 10 facts, the ones that matter most for the track questions first. Skip anything not in this part.""")
 
     def mapper(sec, role="reader"):
+        live.adopt(lk)  # a pool thread: its model answers belong to this worker's slot (trace.py)
         try:
             return llm.chat_json(role, map_sys, f"TRACK {tid} QUESTIONS:\n{qs}\n\nPAPER: {meta['title']}\nSECTION: {sec['title']}\n\n{sec['text']}",
                                  MAP_SCHEMA, max_tokens=900)
@@ -645,6 +653,8 @@ questions_for_others: questions this paper raises that another track should answ
             if prev.get("state") == "cand":
                 m.mark(r, cited_by=m.reg[r]["cited_by"])
     m.log("carded", id=aid, track=tid, secs=full_card["read_seconds"], quote_pass=quote_pass, grade=full_card["quality"]["grade"])
+    trace.emit("text", f"Wrote the card for \"{meta['title']}\" ({full_card['quality']['grade']}, quotes {quote_pass}): "
+               f"{full_card.get('one_line', '')}", paper=aid, track=tid, title=meta["title"])
     return "carded"
 
 

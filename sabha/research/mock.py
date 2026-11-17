@@ -17,7 +17,7 @@ import argparse
 import os
 import time
 
-from . import live, longmem, waves as W
+from . import live, longmem, trace, waves as W
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
 PAPERS = [("2301.08243", "Self-supervised learning from images with a joint-embedding predictive architecture"),
@@ -53,6 +53,7 @@ def main() -> int:
     write_json(m.p("state", "mission.json"), {"status": "running", "started": now(), "ts": now()})
     m.log("planned", tracks=len(tracks))
     live.bind(m.p("state", "live.json"), m.id)
+    trace.bind(m.p("state", "trace.jsonl"))
     live.slot("w0", "worker")
     done_cards: list[str] = []
     finished_by = ""
@@ -111,6 +112,9 @@ def main() -> int:
             tids = [t["id"] for t in m.plan.get("tracks", [])]
             tid = tids[i % len(tids)]
             live.begin(step="map", paper=aid, title=title, track=tid, i=1, n=3)
+            trace.emit("call", tool="fetch_paper", input=f"arXiv {aid}")
+            trace.emit("result", f"{title} · 6 sections (demo)", tool="fetch_paper")
+            trace.emit("think", '{"facts": [{"field": "result", "text": "a demo fact"}]}', role="reader", secs=0.1, tok=12)
             m.mark(aid, state="queued", track=tid, title=title, rel=3, via="search")
             card = {"id": aid, "title": title, "version": "v1", "tracks": [tid], "relevance": 3, "ts": now(),
                     "first_submitted": "2025-01-01", "last_revised": "2025-02-01",
@@ -123,6 +127,7 @@ def main() -> int:
                   + (f"**Why it matters to you.** {card['why_it_matters']}\n" if card["why_it_matters"] else ""))
             m.mark(aid, state="carded", track=tid, title=title)
             m.log("carded", id=aid, track=tid, grade="B", quote_pass=0.9, secs=int(a.every))
+            trace.emit("text", f"Wrote the card for \"{title}\" (demo)", track=tid, paper=aid)
             done_cards.append(aid)
             t_last_card = time.time()
             live.idle()

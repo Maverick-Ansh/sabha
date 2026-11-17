@@ -20,7 +20,7 @@ import threading
 import time
 import traceback
 
-from . import agents as A, inbox, live, llm, longmem, sources as src, waves as W
+from . import agents as A, inbox, live, llm, longmem, sources as src, trace, waves as W
 from .index import Index
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
@@ -288,6 +288,7 @@ class Daemon:
             W.render_report(m, final=True)
             append(m.p("state", "notify.jsonl"), {"kind": "done", "headline": W.headline_of_synthesis(m),
                                                   "cards": m.count("carded"), "waves": len((self.waves or {}).get("history") or [])})
+            trace.emit("final", W.headline_of_synthesis(m), track="team", step="synthesis")
             self.synth_final_done = True
             self.set_status("done")
             self.sync("mission done")
@@ -653,6 +654,7 @@ class Daemon:
             self.queue_loved(m)
             self.set_status("running")
             live.bind(m.p("state", "live.json"), m.id)
+            trace.bind(m.p("state", "trace.jsonl"))
             inbox.restore(self)
             self.standing_steering()
             A.rebuild_playbook(m, self.steer.get("lessons", []))

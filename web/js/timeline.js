@@ -1,5 +1,7 @@
 // Session timeline: x = the cloud session window, one swimlane per agent, events as ticks
 // coloured by kind, missions as soft bars. Wheel/pinch zoom, drag to pan, click to replay.
+// Below the crew, one lane per research agent (GET /api/research/timeline, fed by watch.js): a bar per paper read,
+// the paper in hand as an open bar, ticks for searches, reports and errors, a line at every wave change.
 import { h, showTip, hideTip } from './dom.js';
 import * as log from './events.js';
 import { subscribe, getState, agents, sessionWindow } from './store.js';
@@ -11,6 +13,7 @@ const KINDS = { err: [9, 'coral'], final: [8, 'sun'], human: [7, 'rose'], plan: 
   ok: [4, 'mint'], think: [3, 'lilac'], text: [2, 'ink'], run: [1, 'ink'], status: [1, 'ink'], stderr: [1, 'ink'], raw: [1, 'ink'] };
 const KIND_CODE = Object.keys(KINDS);
 const STEPS = [60, 300, 600, 900, 1800, 3600, 7200, 10800, 21600];
+const R_MARK = { search: 'sky', think: 'lilac', write: 'sun', plan: 'sun', human: 'rose', error: 'coral', dry: 'ink' };
 
 export function createTimeline({ onJump } = {}) {
   const canvas = h('canvas.tl-canvas');
@@ -28,6 +31,7 @@ export function createTimeline({ onJump } = {}) {
   paintColors();
   addEventListener('sabha-theme', () => { paintColors(); dirty = true; });
   let W = 0, H = 0, dpr = 1, gutter = 92, view = null, dirty = true, visible = false, replayTs = null;
+  let rt = null;  // research timeline (null: no research run on this box)
   const AXIS = 18;
 
   const win = () => {
@@ -48,7 +52,9 @@ export function createTimeline({ onJump } = {}) {
   const X = (ts) => gutter + ((ts - view.v0) / (view.v1 - view.v0)) * (W - gutter - 8);
   const T = (x) => view.v0 + ((x - gutter) / (W - gutter - 8)) * (view.v1 - view.v0);
   function lanes() {
-    const list = agents();
+    const rl = rt && rt.tracks ? rt.tracks.map((t) => ({ id: 'r:' + t.id, tid: t.id, name: t.name.replace(/^Track \d+:\s*/, ''),
+      hue: t.hue, research: true, retired: t.retired })) : [];
+    const list = [...agents(), ...rl];
     const n = Math.max(1, list.length);
     const lh = Math.max(9, Math.min(20, (H - AXIS - 8) / n));
     return { list, lh, y0: AXIS + 4 + Math.max(0, (H - AXIS - 8 - lh * n) / 2) };
@@ -97,8 +103,10 @@ export function createTimeline({ onJump } = {}) {
       ctx.fillStyle = rgba(INK, 0.05); ctx.fillRect(gutter, Math.round(y + lh) - 0.5, W - gutter - 8, 1);
       if (gutter > 20) {
         const rgb = rgbOf(hueOf(a));
-        ctx.fillStyle = rgba(rgb, 1); ctx.beginPath(); ctx.arc(12, y + lh / 2, 3, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = rgba(INK, 0.62); ctx.textAlign = 'left'; ctx.font = `500 10px ${MONO}`;
+        ctx.fillStyle = rgba(rgb, a.retired ? 0.4 : 1); ctx.beginPath();
+        if (a.research) ctx.rect(9, y + lh / 2 - 3, 6, 6); else ctx.arc(12, y + lh / 2, 3, 0, Math.PI * 2);  // research: a square
+        ctx.fill();
+        ctx.fillStyle = rgba(INK, a.retired ? 0.35 : 0.62); ctx.textAlign = 'left'; ctx.font = `500 10px ${MONO}`;
         ctx.fillText(truncate(a.name, 10), 21, y + lh / 2 + 0.5);
       }
     });
@@ -142,6 +150,46 @@ export function createTimeline({ onJump } = {}) {
         ctx.fillRect(x, y + (lh - th) / 2, big ? 2 : 1.4, th);
       }
     });
+    // research: papers read as bars, marks as ticks, wave changes as lines across the research lanes
+    if (rt && rt.tracks) {
+      const rLane = new Map();
+      list.forEach((a, i) => { if (a.research) rLane.set(a.tid, i); });
+      const first = Math.min(...rLane.values()), last = Math.max(...rLane.values());
+      for (const sp of rt.spans || []) {
+        const lane = rLane.get(sp.track);
+        if (lane == null) continue;
+        const x0 = Math.max(gutter, X(sp.t0)), x1 = Math.min(W - 8, X(sp.open ? now : sp.t1));
+        if (x1 < gutter || x0 > W) continue;
+        const rgb = rgbOf(hueOf(list[lane]));
+        const y = y0 + lane * lh + 2;
+        ctx.fillStyle = rgba(rgb, sp.open ? 0.22 + 0.12 * Math.sin(now * 2) : sp.grade === 'weak' ? 0.3 : 0.55);
+        roundRect(x0, y, Math.max(2, x1 - x0 - 1), lh - 4, Math.min(4, (lh - 4) / 2));
+        ctx.fill();
+      }
+      for (const mk of rt.marks || []) {
+        const lane = mk.track ? rLane.get(mk.track) : null;
+        const x = Math.round(X(mk.t));
+        if (x < gutter || x >= W - 8) continue;
+        ctx.fillStyle = mk.kind === 'dry' ? rgba(INK, 0.3) : rgba(rgbOf(R_MARK[mk.kind] || 'lilac'), 0.95);
+        if (lane != null) {
+          const y = y0 + lane * lh;
+          ctx.fillRect(x, y + 1, mk.kind === 'error' ? 2 : 1.4, lh - 2);
+        } else if (rLane.size) {  // a run-wide mark (planned, synthesis): a short tick on every research lane
+          ctx.fillRect(x, y0 + first * lh + 1, 1.4, (last - first + 1) * lh - 2);
+        }
+      }
+      if (rLane.size) {
+        const core = rgbOf('core-a');
+        for (const wv of rt.waves || []) {
+          const x = X(wv.t);
+          if (x < gutter || x > W - 8) continue;
+          ctx.strokeStyle = rgba(core, 0.85); ctx.lineWidth = 1.2; ctx.setLineDash([4, 3]);
+          ctx.beginPath(); ctx.moveTo(x + 0.5, y0 + first * lh - 2); ctx.lineTo(x + 0.5, y0 + (last + 1) * lh); ctx.stroke(); ctx.setLineDash([]);
+          ctx.fillStyle = rgba(core, 0.95); ctx.textAlign = 'center'; ctx.font = `600 9.5px ${MONO}`;
+          ctx.fillText(`W${wv.n}`, x, AXIS / 2 + 1);
+        }
+      }
+    }
     // session limit + now
     const xe = X(w.end);
     if (xe > gutter && xe < W) {
@@ -242,6 +290,19 @@ export function createTimeline({ onJump } = {}) {
     const lane = Math.floor((y - y0) / lh);
     const agent = list[lane];
     const tol = (4 / (W - gutter)) * (view.v1 - view.v0);
+    if (agent && agent.research && rt) {  // a research lane: the paper read at that moment, else the nearest mark
+      const sp = (rt.spans || []).find((x) => x.track === agent.tid && ts >= x.t0 - tol && ts <= (x.open ? serverNow() : x.t1) + tol);
+      const near = (rt.marks || []).filter((m) => m.track === agent.tid && Math.abs(m.t - ts) <= tol * 2)
+        .sort((m1, m2) => Math.abs(m1.t - ts) - Math.abs(m2.t - ts))[0];
+      const wv = (rt.waves || []).find((x) => Math.abs(x.t - ts) <= tol * 2);
+      showTip(cxp, cyp,
+        h('div.tip-title', null, fmtClock(ts), h('span.faint', { style: { fontWeight: 400 } }, ` · ${agent.name} (research)`)),
+        wv ? h('div.tip-line', null, `Wave ${wv.n} closed: ${truncate(wv.headline, 140)}`) : null,
+        sp ? h('div.tip-line', null, `${sp.open ? 'reading now' : 'read'} · ${truncate(sp.title || sp.id, 110)}${sp.open ? '' : ` (${sp.grade || 'card'}, ${fmtDur(sp.t1 - sp.t0, true)})`}`) : null,
+        near ? h('div.tip-line', null, truncate(near.text, 140)) : null,
+        !sp && !near && !wv ? h('div.tip-line', null, 'nothing at this moment') : null);
+      return;
+    }
     let best = null;
     const idx = log.entries();
     for (let i = log.indexOfTime(ts - tol); i < idx.length && idx[i].ts <= ts + tol; i++) {
@@ -268,6 +329,7 @@ export function createTimeline({ onJump } = {}) {
     el,
     setVisible(v) { visible = v; if (v) { dirty = true; requestAnimationFrame(render); } },
     clearReplay() { replayTs = null; placeReplay(); },
+    setResearch(d) { rt = d && d.mission && (d.tracks || []).length ? d : null; mark(); },
     setReplay(ts) { replayTs = ts; placeReplay(); },
   };
 }

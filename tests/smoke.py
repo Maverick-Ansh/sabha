@@ -851,6 +851,23 @@ async def main() -> int:
             names2 = zipfile.ZipFile(io.BytesIO(await resp.read())).namelist() if resp.status == 200 else []
         check("continuous: export has the report, the waves and long-term memory", f"{cmid}/REPORT.md" in names2
               and any(n.startswith(f"{cmid}/waves/") for n in names2) and any("/longterm-memory/" in n for n in names2), str(names2[:10]))
+        check("continuous: the live trace stays out of the zip", not any(n.endswith("trace.jsonl") for n in names2))
+        st, tl = await api.call("GET", "/api/research/timeline")
+        check("timeline: research lanes, papers read, waves", st == 200 and tl["mission"] == cmid and len(tl["tracks"]) == 3
+              and len(tl["spans"]) >= 4 and len(tl["waves"]) >= 2 and all(s["t1"] >= s["t0"] for s in tl["spans"]), str(tl)[:300])
+        rk = []
+        for _ in range(20):  # the hub's feed turns the trace into live run events every 2 s
+            st, snap2 = await api.call("GET", "/api/state")
+            st, evs = await api.call("GET", f"/api/events?since={max(0, int(snap2.get('seq_head') or 0) - 1500)}&limit=2000")
+            evl = evs if isinstance(evs, list) else (evs or {}).get("events") or []
+            rk = [e for e in evl if isinstance(e, dict) and str(e.get("agent_id") or "").startswith("r:")]
+            if any(e["type"] == "run.text" for e in rk):
+                break
+            await asyncio.sleep(0.5)
+        kinds = {e["type"] for e in rk}
+        check("feed: research work reaches the live stream as run events", {"run.tool_call", "run.tool_result", "run.thinking",
+                                                                            "run.text"} <= kinds
+              and all(e["mission_id"] == f"research:{cmid}" for e in rk), str(sorted(kinds))[:200])
         st, r = await api.call("POST", "/api/research/start", {"topic": "A quick question about world model planning?", "mode": "instant"})
         check("instant: one short pass", st == 200 and r["mode"] == "instant" and abs(r["hours"] - 0.34) < 0.01 and not r["wave_min"], str(r)[:200])
         st, r = await api.call("POST", "/api/research/stop", {"mode": "now"})

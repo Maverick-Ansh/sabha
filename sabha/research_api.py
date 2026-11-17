@@ -336,6 +336,48 @@ class Research:
                            "focus": [x for x in L["D"]["focus"] if x.get("track") == "all"]}
         return out
 
+    # ------------------------------------------------------------ GET /api/research/timeline
+
+    TL_MARKS = {"scouted": "search", "consolidated": "think", "report": "write", "saturated": "dry", "error": "error",
+                "scout_fail": "error", "search_fail": "error", "command": "human", "replanned": "plan", "synthesis": "write",
+                "memory": "think", "planned": "plan", "seeds": "search"}
+
+    def timeline(self, mission_id: str | None = None, limit: int = 3000) -> dict:
+        """The run's history for Watch's timeline: one lane per track, a span per paper read (a card's events carry
+        how long it took), the paper being read now as an open span, marks for searches, reports, errors and
+        commands, and the wave changes (PROTOCOL.md section 12)."""
+        if not self.available():
+            return {"mission": None}
+        L = self._load(mission_id)
+        if L is None:
+            return {"mission": None}
+        now = time.time()
+        tracks = [{"id": t["id"], "name": t.get("name", t["id"]), "hue": HUES[i % len(HUES)], "retired": t.get("retired") or 0}
+                  for i, t in enumerate(L["plan"].get("tracks") or []) if t.get("id")]
+        spans, marks = [], []
+        for e in L["events"][-limit:]:
+            t = _epoch(e.get("ts"))
+            if not t:
+                continue
+            k = e.get("kind")
+            if k == "carded":
+                secs = float(e.get("secs") or 0)
+                spans.append({"track": e.get("track"), "t0": t - secs, "t1": t, "id": e.get("id"),
+                              "title": self._title(L, e.get("id"))[:140], "grade": e.get("grade"), "open": False})
+            elif k in self.TL_MARKS:
+                marks.append({"track": e.get("track") or None, "t": t, "kind": self.TL_MARKS[k],
+                              "text": _event_text(e, lambda a: self._title(L, a))[:200]})
+        for name, sl in L["slots"].items():  # papers in hand right now
+            if isinstance(sl, dict) and sl.get("kind") == "worker" and sl.get("paper") and sl.get("track"):
+                spans.append({"track": sl["track"], "t0": float(sl.get("since") or now), "t1": now, "id": sl.get("paper"),
+                              "title": (sl.get("title") or self._title(L, sl.get("paper")))[:140], "grade": None, "open": True,
+                              "step": sl.get("step")})
+        w = read_json(os.path.join(L["root"], "state", "waves.json"), {}) or {}
+        waves = [{"n": int(h.get("n") or 0), "t": float(h.get("ended") or 0), "headline": str(h.get("headline") or "")[:200]}
+                 for h in (w.get("history") or []) if isinstance(h, dict) and h.get("ended")]
+        return {"mission": L["id"], "title": L["meta"].get("title"), "now": now, "running": bool(L["alive"]),
+                "tracks": tracks, "spans": spans, "marks": marks, "waves": waves}
+
     # ------------------------------------------------------------ GET /api/research/agent/{tid}
 
     def agent(self, tid: str, mission_id: str | None = None) -> dict:
@@ -538,6 +580,10 @@ def add_routes(router, hub_of, body_of) -> None:
         return web.json_response(await asyncio.to_thread(res(request).command, body))
 
     router.add_get("/api/research", get_overview)
+
+    async def get_timeline(request):
+        return web.json_response(await asyncio.to_thread(res(request).timeline, mid(request)))
+    router.add_get("/api/research/timeline", get_timeline)
     router.add_get("/api/research/agent/{tid}", get_agent)
     router.add_get("/api/research/card/{aid}", get_card)
     router.add_get("/api/research/doc", get_doc)
