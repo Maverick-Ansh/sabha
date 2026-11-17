@@ -6,6 +6,26 @@ import { createOrbit } from './orbit.js';
 import { createStream } from './stream.js';
 import { createTimeline } from './timeline.js';
 import { openComposerModal } from './composer.js';
+import { get } from './api.js';
+import { nav } from './nav.js';
+
+// Research runs in its own process (sabha/research/run.py), not as crew missions, so Watch polls its overview and
+// shows each research agent (one per track) in the roster and on the orbit's outer band.
+const R_POLL_MS = 4000;
+const R_STEP = { fetch: 'fetching', gate: 'checking', map: 'reading', reduce: 'writing the card', verify: 'checking quotes',
+  scouting: 'searching', consolidating: 'folding cards into claims', report: 'writing its report' };
+function rStation(s) {
+  if (!s) return 'think';
+  if (s.kind === 'worker') return s.step === 'fetch' ? 'web' : 'files';
+  return s.step === 'scouting' ? 'web' : 'think';
+}
+function rNow(a) {
+  const s = (a.now || [])[0];
+  if (!s) return a.retired ? `retired after wave ${a.retired}` : a.state === 'saturated' ? 'searches ran dry' : 'waiting for papers';
+  const what = R_STEP[s.step] || s.step || 'working';
+  const more = a.now.length > 1 ? ` (+${a.now.length - 1})` : '';
+  return s.kind === 'worker' ? `${what} · ${s.title || s.paper || ''}${more}` : `${what}${s.query ? ' · ' + s.query : ''}${more}`;
+}
 
 function agentStatus(agentId) {
   const ms = missions().filter((m) => m.agent_id === agentId);
@@ -35,7 +55,10 @@ const STATUS_WORD = { needs: 'needs you', running: 'in session', failed: 'failed
 export function createWatch() {
   const rows = new Map(); // agentId|'*' -> refs
   const rosterList = h('div.roster-list');
-  const roster = h('aside.roster.scroll', null, h('div.panel-label.micro', null, 'the council'), rosterList);
+  const rLabel = h('div.panel-label.micro', { hidden: true }, 'research');
+  const rList = h('div.roster-list');
+  const roster = h('aside.roster.scroll', null, h('div.panel-label.micro', null, 'the council'), rosterList, rLabel, rList);
+  let rData = null, rTimer = 0, rBusy = 0;
 
   const canvas = h('canvas.orbit-canvas', { 'aria-label': 'Agents in orbit around the mission pool', role: 'img' });
   const stat = (label) => { const v = h('div.stat-v.display.italic', null, '0'); return { el: h('div.stat', null, v, h('div.micro', null, label)), v }; };
@@ -56,7 +79,46 @@ export function createWatch() {
   const streamPanel = h('section.stream-panel', null, stream.el);
   const el = h('div.view.watch', { 'data-view': 'watch' }, roster, stage, streamPanel, h('section.tl-panel', null, timeline.el));
 
-  const orbit = createOrbit(canvas, { onFocus: (id) => focus(id) });
+  const orbit = createOrbit(canvas, { onFocus: (id) => focus(id), onResearch: () => nav.go('research') });
+
+  // ---------- research (polled) ----------
+  async function pollResearch() {
+    if (!getState().system || !getState().system.research) { rData = null; paintResearch(); return; }
+    try { rData = await get('/api/research'); } catch { rData = null; }
+    paintResearch();
+  }
+  function paintResearch() {
+    const d = rData;
+    const running = !!(d && d.run && d.run.running && d.mission);
+    const list = running ? (d.agents || []).filter((a) => !a.retired) : [];
+    rBusy = list.filter((a) => a.now && a.now.length).length;
+    orbit.setResearch(list.map((a) => ({ id: 'r:' + a.id, name: a.name, hue: a.hue, working: !!(a.now && a.now.length),
+      now: rNow(a), station: rStation((a.now || [])[0]) })));
+    rLabel.hidden = !running;
+    clear(rList);
+    if (running) {
+      const m = d.mission, w = m.waves || {}, st = m.stats || {};
+      const head = row('r:*', { hue: 'lilac' });
+      head.btn.classList.add('all');
+      setText(head.name, 'Research');
+      setText(head.role, truncate(m.title || m.id, 60));
+      const team = (d.team || []).map((t) => t.step).filter(Boolean);
+      setText(head.now, (w.on ? `wave ${w.n}${team.length ? ' · ' + team[0] : ''} · ` : '') + `${st.cards || 0} papers · ${st.per_hour || 0}/h`);
+      setText(head.statEl, st.left_m != null ? `${st.left_m}m left` : '');
+      head.btn.dataset.status = 'running';
+      rList.appendChild(head.btn);
+      for (const a of list) {
+        const r = row('r:' + a.id, { hue: a.hue });
+        setText(r.name, a.name.replace(/^Track \d+:\s*/, ''));
+        setText(r.role, `${a.counts.carded} cards`);
+        setText(r.now, rNow(a)); r.now.title = rNow(a);
+        r.btn.dataset.status = a.now && a.now.length ? 'running' : 'idle';
+        rList.appendChild(r.btn);
+      }
+    }
+    refreshAllRow();
+    renderStats();
+  }
 
   function focus(id) {
     setUI({ focusAgent: id || null, focusMission: null });
@@ -70,7 +132,7 @@ export function createWatch() {
     const role = h('span.r-role.ellipsis');
     const now = h('div.r-now.ellipsis');
     const statEl = h('span.r-stat');
-    const btn = h('button', { class: 'r-row' + (id === '*' ? ' all' : ''), 'data-hue': id === '*' ? 'sun' : hueOf(a), onclick: () => focus(id === '*' ? null : id) },
+    const btn = h('button', { class: 'r-row' + (id === '*' ? ' all' : ''), 'data-hue': id === '*' ? 'sun' : hueOf(a), onclick: () => (String(id).startsWith('r:') ? nav.go('research') : focus(id === '*' ? null : id)) },
       orb, h('div.r-text', null, h('div.r-top', null, name, role), now), statEl);
     return { btn, name, role, now, statEl, ring };
   }
@@ -108,7 +170,9 @@ export function createWatch() {
     const run = ms.filter((m) => tone(m.status) === 'running').length;
     const need = ms.filter((m) => m.status === 'awaiting_approval').length;
     r.btn.dataset.status = need ? 'needs' : run ? 'running' : 'idle';
-    setText(r.now, run || need ? `${run} running${need ? ` · ${need} need${need === 1 ? 's' : ''} you` : ''}` : ms.length ? 'all quiet' : 'nothing yet');
+    const rr = rData && rData.run && rData.run.running ? ` · research: ${rBusy} of ${(rData.agents || []).filter((a) => !a.retired).length} agents busy` : '';
+    if (rr && !run && !need) r.btn.dataset.status = 'running';
+    setText(r.now, (run || need ? `${run} running${need ? ` · ${need} need${need === 1 ? 's' : ''} you` : ''}` : ms.length ? 'all quiet' : 'nothing yet') + rr);
     setText(r.statEl, '');
     r.btn.classList.toggle('active', !getState().ui.focusAgent);
   }
@@ -120,11 +184,11 @@ export function createWatch() {
     const ms = missions().filter((m) => !f || m.agent_id === f);
     let steps = 0, tools = 0, tok = 0;
     for (const m of ms) { const s = m.stats || {}; steps += s.steps || 0; tools += s.tool_calls || 0; tok += (s.prompt_tokens || 0) + (s.completion_tokens || 0); }
-    countTo(stats.running.v, ms.filter((m) => tone(m.status) === 'running').length);
+    countTo(stats.running.v, ms.filter((m) => tone(m.status) === 'running').length + (f ? 0 : rBusy));
     countTo(stats.steps.v, steps);
     countTo(stats.tools.v, tools);
     countTo(stats.tokens.v, tok);
-    empty.hidden = missions().length > 0 || !getState().ready;
+    empty.hidden = missions().length > 0 || !getState().ready || !!(rData && rData.run && rData.run.running);
   }
   function renderFocus() {
     const { focusAgent: f, focusMission: fm } = getState().ui;
@@ -149,6 +213,10 @@ export function createWatch() {
   let active = false;
   return {
     el,
-    setActive(on) { active = on; orbit.setActive(on); timeline.setVisible(on); if (on) refreshAll(); },
+    setActive(on) {
+      active = on; orbit.setActive(on); timeline.setVisible(on);
+      clearInterval(rTimer); rTimer = 0;
+      if (on) { refreshAll(); pollResearch(); rTimer = setInterval(() => { if (!document.hidden) pollResearch(); }, R_POLL_MS); }
+    },
   };
 }

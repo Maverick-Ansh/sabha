@@ -10,7 +10,7 @@ const TAU = Math.PI * 2;
 const MONO = '"Geist Mono", "Cascadia Mono", Consolas, monospace';
 const SANS = '-apple-system, "SF Pro Text", Inter, "Segoe UI", system-ui, sans-serif';
 
-export function createOrbit(canvas, { onFocus } = {}) {
+export function createOrbit(canvas, { onFocus, onResearch } = {}) {
   const ctx = canvas.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
   let INK = rgbOf('ink'), PAPER = rgbOf('paper'), DISC = rgbOf('disc');
@@ -21,7 +21,9 @@ export function createOrbit(canvas, { onFocus } = {}) {
   addEventListener('sabha-theme', () => { INK = rgbOf('ink'); PAPER = rgbOf('paper'); DISC = rgbOf('disc'); BLEND = blendNow(); });
   let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0, sunR = 30;
   let active = false, raf = 0, last = 0, clock = 0, sunFlare = -9, bloomAt = -1;
-  const orbs = new Map();         // agent_id -> orb state
+  const orbs = new Map();         // agent_id -> orb state ('r:<track>' for a research agent)
+  const research = new Map();     // 'r:<track>' -> { name, working, now, station } from GET /api/research (watch.js)
+  const isR = (id) => typeof id === 'string' && id.startsWith('r:');
   const particles = [], ripples = [];
   const pulses = {};              // station -> { t, rgb }
   const callStation = new Map();  // call_id -> station
@@ -45,7 +47,22 @@ export function createOrbit(canvas, { onFocus } = {}) {
       o.speed = (0.06 + 0.018 * (i % 3)) * (i % 2 ? 0.85 : 1);
       o.rgb = rgbOf(hueOf(a));
     });
-    for (const id of Array.from(orbs.keys())) if (!seen.has(id)) orbs.delete(id);
+    for (const id of Array.from(orbs.keys())) if (!seen.has(id) && !isR(id)) orbs.delete(id);
+  }
+  // Research agents ride an outer band of the orbit, so they read apart from the crew.
+  function setResearch(list) {
+    const seen = new Set();
+    list.forEach((x, i) => {
+      seen.add(x.id);
+      research.set(x.id, x);
+      let o = orbs.get(x.id);
+      if (!o) { o = { id: x.id, angle: (i * 2.399 + 1.1) % TAU, energy: 0, kick: 0, lastThink: 0, lastTalk: 0, lastSpark: -9, x: cx, y: cy, r: 6 }; orbs.set(x.id, o); }
+      o.band = 0.9 - 0.05 * (i % 3);  // a share of R, applied each frame (R changes on resize)
+      o.speed = 0.045 + 0.012 * (i % 3);
+      o.rgb = rgbOf(x.hue || 'sky');
+    });
+    for (const id of Array.from(orbs.keys())) if (isR(id) && !seen.has(id)) { orbs.delete(id); research.delete(id); }
+    if (!active) draw();
   }
 
   function resize() {
@@ -115,11 +132,13 @@ export function createOrbit(canvas, { onFocus } = {}) {
 
   // ---------- drawing ----------
   function working(agentId) {
+    if (isR(agentId)) return !!(research.get(agentId) || {}).working;
     const ms = getState().missions;
     for (const id in ms) { const m = ms[id]; if (m.agent_id === agentId && (m.status === 'running' || m.status === 'planning')) return true; }
     return false;
   }
   function needs(agentId) {
+    if (isR(agentId)) return null;
     const ms = getState().missions;
     for (const id in ms) { const m = ms[id]; if (m.agent_id === agentId && m.status === 'awaiting_approval') return 'needs'; }
     return null;
@@ -290,7 +309,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
         ctx.beginPath(); ctx.arc(o.x, o.y, r + 8, 0, TAU); ctx.stroke();
       }
       // action label
-      const act = acts[o.id];
+      const act = isR(o.id) ? research.get(o.id) : acts[o.id];
       if ((o.energy > 0.5 || focus === o.id) && act && act.now && !dim) label(o, truncate(act.now, 38));
       ctx.globalAlpha = 1;
     }
@@ -345,6 +364,12 @@ export function createOrbit(canvas, { onFocus } = {}) {
     clock += dt;
     for (const o of orbs.values()) {
       const work = working(o.id) || clock - (o.lastEv || -99) < 6;
+      if (isR(o.id)) o.radius = R * (o.band || 0.88);
+      if (isR(o.id) && work && clock - (o.lastSpark || -9) > 2.6) {  // a research agent at work: a spark to its station
+        o.lastSpark = clock;
+        const st = (research.get(o.id) || {}).station || 'think', rgb = o.rgb;
+        spark(() => orbPos(o.id), () => stationPos(st), rgb, { size: 0.8, arrive: () => pulse(st, rgb) });
+      }
       o.energy += ((work ? 1 : 0) - o.energy) * Math.min(1, dt * 1.6);
       o.kick = Math.max(0, o.kick - dt * 1.8);
       o.dir = 1;
@@ -390,6 +415,13 @@ export function createOrbit(canvas, { onFocus } = {}) {
     hoverId = o ? o.id : null;
     canvas.style.cursor = o || Math.hypot(mouse.x - cx, mouse.y - cy) < sunR ? 'pointer' : 'default';
     if (!o) { hideTip(); return; }
+    if (isR(o.id)) {
+      const x = research.get(o.id) || {};
+      showTip(e.clientX, e.clientY,
+        h('div', { class: 'tip-title', 'data-hue': x.hue || 'sky' }, h('span.dot'), x.name || 'research agent', h('span.faint', { style: { fontWeight: 400 } }, ' · research')),
+        h('div.tip-line', null, x.now || 'idle'), h('div.tip-line', null, 'click to open Research'));
+      return;
+    }
     const a = agentById(o.id) || {};
     const act = getState().act.agents[o.id];
     const m = Object.values(getState().missions).find((x) => x.agent_id === o.id && x.status !== 'done' && x.status !== 'stopped' && x.status !== 'failed');
@@ -405,6 +437,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
     const b = canvas.getBoundingClientRect();
     const x = e.clientX - b.left, y = e.clientY - b.top;
     const o = hit(x, y);
+    if (o && isR(o.id)) { if (onResearch) onResearch(o.id.slice(2)); return; }
     if (o) onFocus && onFocus(getState().ui.focusAgent === o.id ? null : o.id);
     else if (Math.hypot(x - cx, y - cy) < sunR * 1.3) onFocus && onFocus(null);
   });
@@ -423,5 +456,6 @@ export function createOrbit(canvas, { onFocus } = {}) {
 
   return {
     setActive(on) { wantActive = on; setActive(on); },
+    setResearch,
   };
 }
