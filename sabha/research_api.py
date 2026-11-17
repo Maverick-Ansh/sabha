@@ -237,6 +237,12 @@ class Research:
     def _track_ids(self, L: dict) -> list[str]:
         return [t.get("id") for t in L["plan"].get("tracks") or [] if t.get("id")]
 
+    def _title_cache(self, mid: str, aid) -> str:
+        """A paper's title from a mission's registry (cached by file mtime), for the live feed."""
+        regd = self._cached(os.path.join(self._mroot(mid), "memory", "registry.jsonl"), _load_registry,
+                            {"reg": {}, "counts": {}, "total": {}})
+        return (regd["reg"].get(aid) or {}).get("title") or ""
+
     def _title(self, L: dict, aid) -> str:
         return (L["regd"]["reg"].get(aid) or {}).get("title") or str(aid or "")
 
