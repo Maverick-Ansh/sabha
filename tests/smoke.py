@@ -860,14 +860,15 @@ async def main() -> int:
             st, snap2 = await api.call("GET", "/api/state")
             st, evs = await api.call("GET", f"/api/events?since={max(0, int(snap2.get('seq_head') or 0) - 1500)}&limit=2000")
             evl = evs if isinstance(evs, list) else (evs or {}).get("events") or []
-            rk = [e for e in evl if isinstance(e, dict) and str(e.get("agent_id") or "").startswith("r:")]
+            rk = [e for e in evl if isinstance(e, dict) and str(e.get("agent_id") or "").startswith("r:")
+                  and e.get("mission_id") == f"research:{cmid}"]  # earlier demo runs stream under their own ids
             if any(e["type"] == "run.text" for e in rk):
                 break
             await asyncio.sleep(0.5)
         kinds = {e["type"] for e in rk}
         check("feed: research work reaches the live stream as run events", {"run.tool_call", "run.tool_result", "run.thinking",
                                                                             "run.text"} <= kinds
-              and all(e["mission_id"] == f"research:{cmid}" for e in rk), str(sorted(kinds))[:200])
+              and any(e["agent_id"] == "r:t3" for e in rk), str(sorted(kinds))[:200])
         st, r = await api.call("POST", "/api/research/start", {"topic": "A quick question about world model planning?", "mode": "instant"})
         check("instant: one short pass", st == 200 and r["mode"] == "instant" and abs(r["hours"] - 0.34) < 0.01 and not r["wave_min"], str(r)[:200])
         st, r = await api.call("POST", "/api/research/stop", {"mode": "now"})
