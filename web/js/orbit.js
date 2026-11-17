@@ -236,7 +236,9 @@ export function createOrbit(canvas, { onFocus } = {}) {
     for (const p of lotusPaths()) { ctx.globalAlpha = p.o; ctx.fill(p.path); }
     ctx.restore(); ctx.globalAlpha = 1;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `600 9.5px ${SANS}`; ctx.fillStyle = rgba(SUN.map((c) => c * 0.72), 0.95);
+    // darkened lilac on the light page, lightened lilac on the dark one (the dark version vanished: seen on a phone)
+    ctx.font = `600 9.5px ${SANS}`;
+    ctx.fillStyle = BLEND === 'screen' ? rgba(SUN.map((c) => c + (255 - c) * 0.55), 0.95) : rgba(SUN.map((c) => c * 0.72), 0.95);
     spaced(running ? `${running} IN SESSION` : 'IN SESSION', cx, cy + dR + 17);
 
     // particles

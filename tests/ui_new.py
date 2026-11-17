@@ -39,6 +39,9 @@ async def main(a):
                     await loc.click(timeout=4000)
                     await page.wait_for_timeout(1200)
 
+                await page.goto(a.base + "#/watch" + tok)  # the orbit is drawn on a canvas: theme colours are set in JS
+                await page.wait_for_timeout(3500)
+                await snap("watch")
                 await page.goto(a.base + "#/research" + tok)
                 await page.wait_for_timeout(4500)
                 await snap("research")
