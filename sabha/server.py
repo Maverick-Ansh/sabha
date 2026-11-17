@@ -31,6 +31,9 @@ from .models import ModelManager
 from .research_api import Research, add_routes as add_research_routes
 from .recall import Recall
 from .research_run import Runner, read_boot
+from .notify import Notifier
+from . import catalog
+from .research import longmem
 from .settings import Settings, Taste
 from .store import Store
 from .talk import TalkManager, thread_public
@@ -77,6 +80,7 @@ class Hub:
         self.cfg = cfg
         self.started_ts = now()
         self.session_limit_s = int(cfg.session_hours * 3600)
+        self.session_end = time.time() + self.session_limit_s  # "until the session ends" research runs stop before this
         self.platform = detect_platform()
         self.store = Store(cfg.data_dir)
         self.store.load()
@@ -95,6 +99,9 @@ class Hub:
         self.recall = Recall(self)  # the box's memory, searched by Talk
         self.research = Research(self)
         self.runner = Runner(self, cfg.research_repo)
+        self.public_link = ""
+        self.notifier = Notifier(self)  # phone push, Telegram, WhatsApp, email, calls (sabha/notify.py)
+        self.longmem_home = longmem.home_for(cfg.research_repo)
         self.sockets: set[web.WebSocketResponse] = set()
 
     async def start(self) -> None:
@@ -108,9 +115,11 @@ class Hub:
             await seed_demo(self)
         self.models.start()
         self.telemetry.start()
+        self.notifier.start()
         self.store.save_now()
 
     async def close(self) -> None:
+        await self.notifier.close()
         await self.missions.close()
         await self.councils.close()
         await self.talk.close()
@@ -352,6 +361,189 @@ async def research_start(request):
 async def research_stop(request):
     body = await _body(request)
     return web.json_response(await asyncio.to_thread(_hub(request).runner.stop, str(body.get("mode") or "now")))
+
+
+async def get_notify(request):
+    return web.json_response(_hub(request).notifier.public())
+
+
+async def put_notify(request):
+    return web.json_response(await asyncio.to_thread(_hub(request).notifier.update, await _body(request)))
+
+
+async def test_notify(request):
+    body = await _body(request)
+    ch = str(body.get("channel") or "")
+    hub = _hub(request)
+    if ch and ch not in hub.notifier.public():
+        raise ApiError(400, "unknown channel")
+    res = await hub.notifier.asend("test", "Test from Sabha", "If you can read this, notifications reach you. "
+                                   "Research runs will report here after every wave.", only=ch)
+    if ch and not res:
+        raise ApiError(409, f"{ch} is not set up yet: fill its fields and save first")
+    return web.json_response({"results": res})
+
+
+async def telegram_find(request):
+    return web.json_response(await asyncio.to_thread(_hub(request).notifier.tg_find_chat))
+
+
+DEMO_GPUS = [{"index": 0, "name": "Tesla T4 (demo)", "mem_mb": 15360}, {"index": 1, "name": "Tesla T4 (demo)", "mem_mb": 15360}]
+
+
+def _box_gpus(hub) -> list[dict]:
+    b = read_boot(hub.cfg.data_dir)
+    g = [x for x in b.get("gpus") or [] if isinstance(x, dict) and "mem_mb" in x]
+    return g or (DEMO_GPUS if hub.cfg.demo else [])
+
+
+def _layout_path(hub) -> Path:
+    return Path(hub.cfg.data_dir) / "run" / "layout.json"
+
+
+def _layout(hub) -> dict:
+    try:
+        d = json.loads(_layout_path(hub).read_text("utf-8"))
+        d = d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        d = {}
+    steps = {s.get("id"): s for s in read_boot(hub.cfg.data_dir).get("steps") or []}
+    for srv in d.get("servers") or []:
+        st = steps.get("model:" + str(srv.get("role")))
+        srv["status"] = (st or {}).get("status") or ("demo" if hub.cfg.demo else "pending")
+        srv["detail"] = (st or {}).get("detail") or ""
+    return d
+
+
+def _with_plans(m: dict, gpus: list[dict], layout: dict) -> dict:
+    """A catalog entry plus how it would run here: as the only model (every role), or in the seat of each role."""
+    out = dict(m)
+    out["solo"] = catalog.plan_for(m, gpus, 1.0)
+    seats = {}
+    by_index = {g["index"]: g for g in gpus}
+    for srv in layout.get("servers") or []:
+        use = [by_index[i] for i in srv.get("gpus") or [] if i in by_index]
+        share = float(srv.get("util") or 0.9) / 0.9
+        if use:
+            seats[srv["role"]] = catalog.plan_for(m, use, min(share, 1.0))
+    out["seats"] = seats
+    return out
+
+
+async def get_catalog(request):
+    hub = _hub(request)
+
+    def build():
+        gpus = _box_gpus(hub)
+        lay = _layout(hub)
+        return {"gpus": [{**g, "sm": catalog.gpu_sm(g["name"])} for g in gpus], "layout": lay,
+                "presets": catalog.presets(gpus), "models": [_with_plans(catalog._row(r), gpus, lay) for r in catalog.CATALOG],
+                "demo": hub.cfg.demo}
+    return web.json_response(await asyncio.to_thread(build))
+
+
+async def search_catalog(request):
+    hub = _hub(request)
+    q = request.query.get("q", "")
+
+    def build():
+        gpus, lay = _box_gpus(hub), _layout(hub)
+        if "/" in q.strip() and " " not in q.strip():
+            return {"models": [_with_plans(catalog.lookup(q), gpus, lay)]}
+        return {"models": [_with_plans(m, gpus, lay) for m in catalog.search(q)]}
+    return web.json_response(await asyncio.to_thread(build))
+
+
+async def use_catalog(request):
+    """{preset: id} or {hf, as: solo | deep | reader}: write layout.json; the box supervisor applies it live."""
+    hub = _hub(request)
+    body = await _body(request)
+
+    def apply():
+        gpus = _box_gpus(hub)
+        if not gpus:
+            raise ApiError(409, "no GPU on this box (or the box launcher did not start it): nothing to serve models on")
+        cur = _layout(hub).get("servers") or []
+        if body.get("preset"):
+            pre = next((p for p in catalog.presets(gpus) if p["id"] == body["preset"]), None)
+            if pre is None:
+                raise ApiError(404, "no such preset for these GPUs")
+            servers, why = pre["servers"], f"preset: {pre['title']}"
+        else:
+            m = catalog.lookup(str(body.get("hf") or ""))
+            seat = str(body.get("as") or "solo")
+            if seat == "solo":
+                plan = catalog.plan_for(m, gpus, 1.0)
+                if plan["fits"] == "no":
+                    raise ApiError(409, plan["why"])
+                servers, why = [catalog.server("deep", m, plan, gpus)], f"{m['label']} serves every role"
+            elif seat in ("deep", "reader"):
+                old = next((s for s in cur if s.get("role") == seat), None)
+                if old is None:
+                    raise ApiError(409, f"no {seat} server right now: use the model as the only one, or pick a preset")
+                by_index = {g["index"]: g for g in gpus}
+                use = [by_index[i] for i in old.get("gpus") or [] if i in by_index]
+                plan = catalog.plan_for(m, use, min(float(old.get("util") or 0.9) / 0.9, 1.0))
+                if plan["fits"] == "no":
+                    raise ApiError(409, f"{plan['why']} (the {seat} seat has GPU {','.join(map(str, old.get('gpus') or []))}); "
+                                        "use it as the only model instead")
+                servers = [s for s in cur if s.get("role") != seat] + [catalog.server(seat, m, plan, gpus)]
+                why = f"{m['label']} as {seat}"
+            else:
+                raise ApiError(400, "as must be solo, deep or reader")
+        for s in servers:
+            s.pop("status", None)
+            s.pop("detail", None)
+        path = _layout_path(hub)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"servers": servers, "by": why, "ts": time.time()}, indent=1), encoding="utf-8")
+        os.replace(tmp, path)
+        gib = sum(float(s.get("weights_gib") or 0) for s in servers)
+        running = hub.runner.status().get("running")
+        note = ("Demo: the layout is saved, nothing is served." if hub.cfg.demo else
+                f"Switching now: about {gib:.0f} GB to download, then about 10 minutes to start. The boot strip shows the progress."
+                + (" The research run pauses while the model reloads; it picks up again on its own." if running else ""))
+        return {"layout": _layout(hub), "note": note, "why": why}
+    return web.json_response(await asyncio.to_thread(apply))
+
+
+async def get_longmem(request):
+    hub = _hub(request)
+    q = request.query.get("q", "").strip()
+    if q:
+        mems = await asyncio.to_thread(longmem.recall, hub.longmem_home, q, 30)
+    else:
+        mems = await asyncio.to_thread(longmem.load_all, hub.longmem_home)
+    return web.json_response({"home": hub.longmem_home, "types": list(longmem.TYPES),
+                              "memories": [{k: m.get(k) for k in ("name", "type", "description", "updated", "source", "uses", "score")}
+                                           for m in mems]})
+
+
+async def get_longmem_one(request):
+    m = await asyncio.to_thread(longmem.get, _hub(request).longmem_home, request.match_info["name"])
+    if not m:
+        raise ApiError(404, "no such memory")
+    return web.json_response(m)
+
+
+async def put_longmem_one(request):
+    hub = _hub(request)
+    body = await _body(request)
+    name = request.match_info["name"]
+    done = await asyncio.to_thread(longmem.apply_ops, hub.longmem_home, [{
+        "op": "update", "name": name, "type": body.get("type") or "owner",
+        "description": body.get("description") or "", "body": body.get("body") or ""}], "owner (edited in the app)")
+    if not done:
+        raise ApiError(400, "a memory needs a description and a body")
+    return web.json_response(await asyncio.to_thread(longmem.get, hub.longmem_home, name))
+
+
+async def delete_longmem_one(request):
+    ok = await asyncio.to_thread(longmem.delete, _hub(request).longmem_home, request.match_info["name"])
+    if not ok:
+        raise ApiError(404, "no such memory")
+    return web.json_response({"ok": True})
 
 
 async def research_export(request):
@@ -695,6 +887,17 @@ def create_app(hub: Hub) -> web.Application:
     r.add_post("/api/research/start", research_start)
     r.add_post("/api/research/stop", research_stop)
     r.add_get("/api/research/export/{mid}", research_export)
+    r.add_get("/api/notify", get_notify)
+    r.add_put("/api/notify", put_notify)
+    r.add_post("/api/notify/test", test_notify)
+    r.add_post("/api/notify/telegram/find", telegram_find)
+    r.add_get("/api/catalog", get_catalog)
+    r.add_get("/api/catalog/search", search_catalog)
+    r.add_post("/api/catalog/use", use_catalog)
+    r.add_get("/api/longmem", get_longmem)
+    r.add_get("/api/longmem/{name}", get_longmem_one)
+    r.add_put("/api/longmem/{name}", put_longmem_one)
+    r.add_delete("/api/longmem/{name}", delete_longmem_one)
     r.add_get("/ws", ws_handler)
     r.add_get("/{tail:.*}", static_handler)
 

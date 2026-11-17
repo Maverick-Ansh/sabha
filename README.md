@@ -27,9 +27,11 @@ your laptop / phone                     Colab or Kaggle box
 2. Run the one cell. About **1 minute** later it prints one link. Open it on your laptop or phone.
 3. The app shows your box coming up in a strip under the top bar. The two models are ready about
    **15 minutes** after you ran the cell. Then use any tab:
-   - **Research**: write your research taste, papers you love and a question, pick the hours, press **Start research**.
-     The agents split the question into tracks, find and read papers for hours, and judge them by your taste.
-     **Finish now** writes the final reports and synthesis early. **Download results** gives you everything as a zip.
+   - **Research**: write a question and choose how the agents work. **Instant** is one pass of about 20 minutes.
+     **Continuous** keeps them at it for the hours you pick (or until the session ends), in waves: after every wave
+     they add a chapter to the report, compact what they know, keep lessons in long-term memory, clear their
+     context and re-plan where the open questions are. **Report** shows where things stand at any moment.
+     **Finish now** writes the final answer early. **Download results** gives you everything as a zip.
    - **Talk**: think out loud with an agent (Lead, Scout, Critic, Builder are made for you). It remembers everything
      the box has done (research runs, paper cards, councils, missions, earlier chats) and searches that or the web
      before it answers; each lookup shows in the reply. Flip the composer to Mission for long work.
@@ -49,12 +51,85 @@ Good to know:
   [Tavily](https://tavily.com) key fixes that: paste it in the Research tab, or add a Kaggle Secret `TAVILY_API_KEY`.
 - **Optional Kaggle Secrets** (Add-ons > Secrets, and tick each one for this notebook): `TAVILY_API_KEY`, `HF_TOKEN`,
   and `SABHA_GIT_REPO` (`owner/name`) with `SABHA_GIT_TOKEN` to push research results to your own GitHub repo every 10 minutes.
-- **Colab works too** (one T4, so one model does everything): [colab/sabha_colab.ipynb](colab/sabha_colab.ipynb).
+  Alerts on your phone read secrets too (see "Alerts" below), so every new box texts you its link.
+- **Colab works too** (one T4, so one model does everything; an A100 gets Qwen3.5 27B): [colab/sabha_colab.ipynb](colab/sabha_colab.ipynb).
+- **Laptop closed?** Kaggle can run the notebook in the background: Save Version, then *Save & Run All (Commit)*, with the
+  GPU and Internet on and your alert secrets attached. The box then texts you its link (see "Alerts"). Not yet verified
+  end to end on our side: try it with a short run first.
+- **Light or dark:** the sun / moon button in the top bar (it follows your system until you choose).
+
+## Continuous research: how the agents keep going for hours
+
+A long run is cut into **waves** (20 to 60 minutes each, chosen from the run length, or set by you). Inside a wave
+the agents work as before: scout searches, readers take one paper each (a fresh context per paper), the deep model
+folds new cards into each track's claims ledger. When the wave ends, the deep model:
+
+1. writes the wave's **chapter** (`waves/wNN.md`): what it found, what changed in what the team believes, dead ends;
+2. **compacts** the state of knowledge (`knowledge.md`, under 900 words): the answer so far, what is established,
+   contested, open, the dead ends, the next directions. This is the only history the next wave carries;
+3. tends **long-term memory** (below): a few lessons, preferences, facts and sources worth keeping after the run;
+4. **re-plans**: keeps, refocuses or retires each track and may open new ones for the open questions.
+
+Then every agent starts the next wave from files only, so a 12-hour run keeps every prompt the same size. The
+**living report** (`REPORT.md`, the Report button) is rebuilt from those parts: where we stand on top, one chapter
+per wave below, and the final answer at the very top when the run ends. A wave also ends early when every track has
+run dry, so the agents never sit idle waiting for the clock.
+
+Context engineering in the prompts: the parts that do not change within a wave (the memory lesson, the mission, the
+track, your taste, the state of knowledge, the long-term memories picked for this run) come first, so vLLM's prefix
+cache keeps hitting; the parts that change (the paper, the nearest claims, the board) come last. Every block has
+its own size budget, so the important ones are never cut.
+
+**Long-term memory** (`<data>/memory/`, one file per memory and a `MEMORY.md` index) is what the agents keep across
+runs: `owner` (what you like and distrust), `lesson` (searches and habits that worked or failed), `fact` (findings
+with their arXiv ids) and `source` (papers, repos, benchmarks worth coming back to). Each run starts from the
+memories closest to its question; the gardener adds, updates or deletes a few at every wave. Research, Memory lists
+them; delete anything wrong. Talk searches them too.
+
+## Alerts: the box texts you
+
+Crew, **Alerts** sets any of these (all optional, all free except a real phone call):
+
+| Channel | Setup | What you can do |
+|---|---|---|
+| Phone push (ntfy) | install the ntfy app, subscribe to a long topic name, type the same name in Sabha | read |
+| Telegram | @BotFather, /newbot, paste the token, message your bot once, press Find my chat | read and reply: `/status`, `/report`, `/research <question> for 4h`, `/tell <instruction>`, `/finish`, `/stop` |
+| WhatsApp | CallMeBot: message their number once for a free key | read |
+| Email | SMTP (for Gmail an app password) | read |
+| Phone call | Twilio (paid), or a free Telegram voice call through CallMeBot | rings when a run finishes or breaks |
+
+You hear about: the box being up (with the new link, so you never copy it from the notebook), the models ready, a
+run started, every wave (its headline), the run finished (the first sentence of the answer), problems, and 30
+minutes before the session ends. Calls ring only for "finished" and "problem". The same settings come from Kaggle /
+Colab secrets on every new box: `NTFY_TOPIC`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `WHATSAPP_PHONE`,
+`CALLMEBOT_KEY`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `NOTIFY_EMAIL`, `TWILIO_SID`, `TWILIO_TOKEN`,
+`TWILIO_FROM`, `CALL_TO`, `CALL_TELEGRAM_USER`.
+
+## Bigger GPUs, more models
+
+Crew, **Models** shows the box's GPUs, which model serves which role, ready layouts for this hardware and a catalog
+with a fit verdict per model (fits, tight, too big, GPU too old), worked out from the weights, the KV cache and
+the GPU's memory and compute capability. Search finds any model on Hugging Face (size from its safetensors
+metadata, context cost from its config.json). **Use** switches the box live: the supervisor stops the old server,
+downloads the new weights and starts vLLM, and the boot strip shows the progress. Agents reach models by role, so
+the crew and research keep working.
+
+| Box | Default | Also ready |
+|---|---|---|
+| Kaggle 2x T4 | Qwen3.5 9B (4-bit) deep + 4B reader | Qwen3.5 27B (4-bit) over both GPUs |
+| Colab T4 | Qwen3.5 9B (4-bit) | Qwen3.5 4B |
+| Colab L4 | Qwen3.5 9B (4-bit) | full 9B, Qwen3.5 35B-A3B MoE (4-bit) |
+| Colab A100 40 GB | Qwen3.5 27B (4-bit) | + a 9B reader, 35B-A3B MoE, gpt-oss 20B |
+| Colab A100 80 GB / H100 | Qwen3.5 27B (full precision) | + a 9B reader, 35B-A3B MoE, gpt-oss 120B, Llama 3.3 70B (4-bit) |
+
+On a GPU newer than a T4 the servers run in bf16 with vLLM's own attention kernels; on a T4 in fp16 with Triton
+attention. vLLM is pinned to 0.33.0: 0.34.0 fails on the T4 (its FlashInfer JIT kernel does not link on sm75).
 
 ## The modes
 
-- **Research.** A long-running literature mission on one screen: one tile per research agent, tap for what it
-  is doing and a summary, instruct it from your phone. See "Research on your phone" below.
+- **Research.** A literature mission on one screen, instant or continuous: the waves, the living report, one tile
+  per research agent (tap for what it is doing and a summary, instruct it from your phone), long-term memory.
+  On a phone the form at the top is the whole "give the agents a task" screen; add the page to your home screen.
 - **Watch.** A live orbit of your agents, a full transcript of every thought, tool call
   and result, and a timeline of the whole 12-hour session you can scrub back through.
   A `raw` switch shows the exact event JSON. Nothing is hidden.

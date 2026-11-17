@@ -8,6 +8,9 @@
   --paper: #F6F4FC;
   --paper-2: #EDE9F8;
   --paper-rgb: 246, 244, 252;
+  --paper-top: #FBFAFE;
+  --glass-rgb: 255, 255, 255;   /* frosted surfaces: rgba(var(--glass-rgb), a) */
+  --disc-rgb: 255, 255, 255;    /* the orbit's discs and labels (canvas) */
   --card: rgba(255, 255, 255, .62);
   --card-solid: #FFFFFF;
   --card-strong: rgba(255, 255, 255, .86);
@@ -84,4 +87,41 @@
   --roster-w: 264px;
   --stream-w: 420px;
   --timeline-h: 112px;
+}
+
+/* Dark: "Lotus at night". The same lotus on a deep indigo page; glass turns smoky, hairlines glow faintly violet,
+   the deep hue variants lighten so text in an agent's hue stays readable. The top bar toggle sets data-theme;
+   without a choice the system setting decides. */
+:root { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #13111F;
+  --paper-2: #0D0B17;
+  --paper-rgb: 19, 17, 31;
+  --paper-top: #1A1730;
+  --glass-rgb: 40, 36, 64;
+  --disc-rgb: 44, 40, 70;
+  --card: rgba(34, 31, 56, .62);
+  --card-solid: #1D1A2F;
+  --card-strong: rgba(36, 33, 58, .9);
+  --glass-edge: rgba(255, 255, 255, .07);
+  --ink: #EDEBF7;
+  --ink-2: #ABA6C4;
+  --ink-3: #8C87A8;
+  --ink-rgb: 237, 235, 247;
+  --line: rgba(186, 174, 255, .15);
+  --line-2: rgba(186, 174, 255, .08);
+  --wash: rgba(186, 174, 255, .07);
+  --sun-deep: #FFB648;   --coral-deep: #FF8178;  --mint-deep: #57D98A;
+  --sky-deep: #78AEFF;   --lilac-deep: #AEA2FF;  --rose-deep: #FF82B8;
+  --sun-soft: rgba(var(--sun-rgb), .18);     --coral-soft: rgba(var(--coral-rgb), .17); --mint-soft: rgba(var(--mint-rgb), .17);
+  --sky-soft: rgba(var(--sky-rgb), .17);     --lilac-soft: rgba(var(--lilac-rgb), .2);  --rose-soft: rgba(var(--rose-rgb), .17);
+  --action: #A193FF;
+  --brand-soft: linear-gradient(135deg, rgba(var(--core-a-rgb), .2), rgba(var(--core-b-rgb), .18));
+  --wash-peach: rgba(var(--core-b-rgb), .09);
+  --wash-sky: rgba(var(--core-a-rgb), .13);
+  --wash-mint: rgba(255, 255, 255, .025);
+  --shadow: 0 0 0 .5px rgba(0, 0, 0, .3), 0 1px 1px rgba(0, 0, 0, .2), 0 18px 40px -20px rgba(0, 0, 0, .7);
+  --shadow-sm: 0 0 0 .5px rgba(0, 0, 0, .3), 0 6px 16px -9px rgba(0, 0, 0, .6);
+  --shadow-lg: 0 0 0 .5px rgba(0, 0, 0, .35), 0 34px 74px -28px rgba(0, 0, 0, .8), 0 4px 12px -6px rgba(0, 0, 0, .4);
 }

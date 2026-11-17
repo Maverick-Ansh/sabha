@@ -108,6 +108,10 @@ class Mission:
     def track_ids(self) -> list[str]:
         return [t["id"] for t in self.plan.get("tracks", [])]
 
+    def active_track_ids(self) -> list[str]:
+        """Tracks still working: a wave re-plan can retire one (research/waves.py); its cards stay."""
+        return [t["id"] for t in self.plan.get("tracks", []) if not t.get("retired")]
+
     def track(self, tid: str) -> dict:
         return next((t for t in self.plan.get("tracks", []) if t["id"] == tid), {})
 
@@ -200,7 +204,7 @@ Rules:
 
 
 def packet(m: Mission, tid: str, near_claims: list[dict] | None = None, steering_lines: list[str] | None = None,
-           max_chars: int = 7000) -> str:
+           max_chars: int = 9000) -> str:
     """The MEMORY PACKET: everything an agent knows when it starts a step."""
     t = m.track(tid)
     parts = [f"MISSION: {m.plan.get('one_line', '')}",
@@ -214,6 +218,20 @@ def packet(m: Mission, tid: str, near_claims: list[dict] | None = None, steering
              if isinstance(x, dict) and x.get("track") in (tid, "all") and x.get("text")][-8:]
     if human:
         parts.append("STANDING INSTRUCTIONS FROM THE HUMAN (they apply to everything you do in this step):\n" + "\n".join(f"- {s}" for s in human))
+    # the team's compacted state of knowledge (research/waves.py) and long-term memory from earlier runs: both are
+    # fixed for a whole wave, so this prefix of the prompt repeats exactly and the server's prefix cache keeps hitting
+    for title, path, limit in (("STATE OF KNOWLEDGE (the whole team, after the last wave)", m.p("knowledge.md"), 0),
+                               ("LONG-TERM MEMORY (lessons, owner preferences and sources from earlier runs)", m.p("state", "longmem.txt"), 1300)):
+        try:
+            text = open(path, encoding="utf-8").read()
+        except OSError:
+            continue
+        if not limit:  # knowledge.md: only the answer so far, the open questions and the dead ends
+            keep = re.findall(r"^## +((?:Answer|Open|Dead)[^\n]*)\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+            text = "\n".join(f"{t.strip().upper()}:\n{b.strip()}" for t, b in keep)
+            limit = 1400
+        if text.strip():
+            parts.append(f"{title}:\n{text.strip()[:limit]}")
     dig = ""
     try:
         dig = open(m.p("tracks", tid, "digest.md"), encoding="utf-8").read()[:2500]

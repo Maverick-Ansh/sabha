@@ -37,6 +37,7 @@ DOC_MAX = 200 * 1024
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,80}$")
 DOCS = {  # kind -> path parts; "{t}" is the track id
     "status": ("STATUS.md",), "digest": ("DIGEST.md",), "synthesis": ("synthesis.md",), "brief": ("brief.md",),
+    "living": ("REPORT.md",), "knowledge": ("knowledge.md",),
     "report": ("tracks", "{t}", "report.md"), "track_digest": ("tracks", "{t}", "digest.md"),
     "assignment": ("tracks", "{t}", "assignment.md"),
 }
@@ -126,6 +127,13 @@ def _event_text(e: dict, title_of) -> str:
         return f"Validator steering {e.get('seq')} applied: " + "; ".join(str(x) for x in (e.get("items") or [])[:3])
     if k == "error":
         return f"Error: {e.get('msg', '')}"
+    if k == "wave":
+        return (f"Wave {e.get('n')} closed ({e.get('cards', 0)} papers): {e.get('headline', '')}"
+                + ("" if e.get("final") else f". Context cleared; wave {e.get('next')} starts from the new state of knowledge"))
+    if k == "replanned":
+        return f"Re-planned for wave {e.get('wave')}: " + "; ".join(str(x) for x in (e.get("changes") or [])[:5])
+    if k == "memory":
+        return "Long-term memory: " + ("; ".join(str(x) for x in (e.get("ops") or [])[:4]) or "nothing new worth keeping")
     return str(k)
 
 
@@ -251,13 +259,25 @@ class Research:
             if e.get("kind") == "carded" and e.get("track") == tid:
                 last = {"id": e.get("id"), "title": self._title(L, e.get("id")), "t": _epoch(e.get("ts"))}
                 break
-        state = "working" if doing else "paused" if paused else "saturated" if saturated else "idle"
+        retired = t.get("retired")
+        state = "working" if doing else "retired" if retired else "paused" if paused else "saturated" if saturated else "idle"
         return {"id": tid, "name": t.get("name", tid), "one_line": t.get("one_line", ""), "hue": HUES[i % len(HUES)],
                 "weight": weight, "paused": paused, "saturated": saturated, "state": state, "counts": counts,
-                "now": doing, "last_card": last,
+                "now": doing, "last_card": last, "retired": retired or 0, "since_wave": t.get("since_wave") or 1,
                 "instructions": sum(1 for x in L["D"]["instructions"] if x.get("track") in (tid, "all")),
                 "focus": sum(1 for x in L["D"]["focus"] if x.get("track") in (tid, "all")),
                 "pending": sum(1 for c in L["pending"] if c.get("track") in (tid, "all"))}
+
+    def _waves(self, root: str) -> dict:
+        """Continuous runs (research/waves.py): the wave in progress and the closed ones, newest last."""
+        w = read_json(os.path.join(root, "state", "waves.json"), {}) or {}
+        if not isinstance(w, dict) or not w.get("n"):
+            return {"on": False}
+        hist = [{k: h.get(k) for k in ("n", "started", "ended", "cards", "headline", "memory")}
+                for h in (w.get("history") or []) if isinstance(h, dict)]
+        return {"on": True, "n": int(w.get("n") or 1), "started": w.get("started") or 0, "ends": w.get("ends") or 0,
+                "wave_s": w.get("wave_s") or 0, "closed": bool(w.get("closed")), "history": hist[-24:],
+                "plan_changes": (w.get("plan_changes") or [])[:12]}
 
     def _feed(self, L: dict, keep, n: int) -> list[dict]:
         out = []
@@ -299,7 +319,10 @@ class Research:
                           "stats": {"cards": total["carded"], "queued": total["queued"], "reading": total["reading"],
                                     "rejected": total["rejected"], "failed": total["failed"], "per_hour": pph,
                                     "left_m": left_m, "errors": int(errs.group(1)) if errs else 0},
-                          "has_synthesis": os.path.isfile(os.path.join(root, "synthesis.md"))}
+                          "has_synthesis": os.path.isfile(os.path.join(root, "synthesis.md")),
+                          "has_report": os.path.isfile(os.path.join(root, "REPORT.md")),
+                          "has_knowledge": os.path.isfile(os.path.join(root, "knowledge.md")),
+                          "waves": self._waves(root)}
         out["daemon"] = {"alive": L["alive"], "age_s": None if L["age"] > 1e8 else int(L["age"])}
         out["agents"] = [self._row(L, i, t) for i, t in enumerate(plan.get("tracks") or []) if t.get("id")]
         workers = [s for s in L["slots"].values() if isinstance(s, dict) and s.get("kind") == "worker"]

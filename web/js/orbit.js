@@ -13,7 +13,12 @@ const SANS = '-apple-system, "SF Pro Text", Inter, "Segoe UI", system-ui, sans-s
 export function createOrbit(canvas, { onFocus } = {}) {
   const ctx = canvas.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
-  const INK = rgbOf('ink'), PAPER = rgbOf('paper'), SUN = rgbOf('core-a'), CORAL = rgbOf('core-b');
+  let INK = rgbOf('ink'), PAPER = rgbOf('paper'), DISC = rgbOf('disc');
+  const SUN = rgbOf('core-a'), CORAL = rgbOf('core-b');
+  // glows multiply on the light page (nothing washes out) and add light on the dark one (multiply would hide them)
+  const blendNow = () => (document.documentElement.dataset.theme === 'dark' ? 'screen' : 'multiply');
+  let BLEND = blendNow();
+  addEventListener('sabha-theme', () => { INK = rgbOf('ink'); PAPER = rgbOf('paper'); DISC = rgbOf('disc'); BLEND = blendNow(); });
   let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0, sunR = 30;
   let active = false, raf = 0, last = 0, clock = 0, sunFlare = -9, bloomAt = -1;
   const orbs = new Map();         // agent_id -> orb state
@@ -191,7 +196,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
         glow(p.x, p.y, 20, pl.rgb, 0.35 * (1 - k));
       }
       ctx.globalAlpha = open;
-      ctx.fillStyle = age < 1.4 ? rgba(pl.rgb, 1) : 'rgba(255,255,255,1)';
+      ctx.fillStyle = age < 1.4 ? rgba(pl.rgb, 1) : rgba(DISC, 1);
       ctx.strokeStyle = age < 1.4 ? rgba(pl.rgb, 1) : rgba(SUN, 0.55); ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, TAU); ctx.fill(); ctx.stroke();
       const lx = cx + Math.cos(p.a) * (R + 18), ly = cy + Math.sin(p.a) * (R + 18);
@@ -206,7 +211,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
     const flare = Math.max(0, 1 - (t - sunFlare) / 1.6);
     const breath = reduce.matches ? 0 : Math.sin(t * 1.3) * 0.5 + 0.5;
     const dR = sunR * (1.12 + breath * 0.02);
-    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalCompositeOperation = BLEND;
     glow(cx, cy, sunR * (2.7 + breath * 0.35 + flare * 1.6), SUN, 0.22 + flare * 0.3);
     glow(cx, cy, sunR * 1.8, CORAL, 0.12 + flare * 0.15);
     ctx.globalCompositeOperation = 'source-over';
@@ -218,10 +223,10 @@ export function createOrbit(canvas, { onFocus } = {}) {
     ctx.save();
     ctx.shadowColor = rgba(SUN, 0.45); ctx.shadowBlur = 22; ctx.shadowOffsetY = 8;
     const disc = ctx.createRadialGradient(cx, cy - dR * 0.4, dR * 0.1, cx, cy, dR);
-    disc.addColorStop(0, 'rgba(255,255,255,1)'); disc.addColorStop(1, 'rgba(250,247,255,.96)');
+    disc.addColorStop(0, rgba(DISC, 1)); disc.addColorStop(1, rgba(DISC, 0.96));
     ctx.fillStyle = disc; ctx.beginPath(); ctx.arc(cx, cy, dR, 0, TAU); ctx.fill();
     ctx.restore();
-    ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, dR, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = rgba(DISC, 0.95); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, dR, 0, TAU); ctx.stroke();
     const gs = dR * 1.34 * (1 + flare * 0.12), k32 = gs / 32;
     ctx.save();
     ctx.translate(cx - gs / 2, cy - gs / 2 - dR * 0.03); ctx.scale(k32, k32);
@@ -244,7 +249,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
         ctx.beginPath(); ctx.arc(q.x, q.y, (i ? 2.1 - i * 0.2 : 2.8) * p.size, 0, TAU); ctx.fill();
       }
       const head = bez(p0, p1, p.bend, ease(p.t));
-      ctx.globalCompositeOperation = 'multiply'; glow(head.x, head.y, 12 * p.size, p.rgb, 0.4); ctx.globalCompositeOperation = 'source-over';
+      ctx.globalCompositeOperation = BLEND; glow(head.x, head.y, 12 * p.size, p.rgb, 0.4); ctx.globalCompositeOperation = 'source-over';
     }
     // ripples
     for (const r of ripples) {
@@ -262,7 +267,7 @@ export function createOrbit(canvas, { onFocus } = {}) {
       const a = dim ? 0.38 : 1;
       const r = o.r;
       ctx.globalAlpha = a;
-      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalCompositeOperation = BLEND;
       glow(o.x, o.y, r * (2.4 + o.energy * 2.6 + o.kick), o.rgb, 0.16 + o.energy * 0.32);
       ctx.globalCompositeOperation = 'source-over';
       const g = ctx.createRadialGradient(o.x - r * 0.36, o.y - r * 0.42, r * 0.06, o.x, o.y, r);

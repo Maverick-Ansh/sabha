@@ -2,8 +2,8 @@
 // per agent (now doing, summary, cards, instructions, clear context, pause), and a new-mission composer.
 // Data comes from GET /api/research every 3 s; commands go to POST /api/research/command (PROTOCOL section 8).
 import { h, icon, setText, clear, autogrow } from './dom.js';
-import { get, post, enc } from './api.js';
-import { fmtAgo, fmtDur, serverNow } from './format.js';
+import { get, post, del, enc } from './api.js';
+import { fmtAgo, fmtDur, fmtClock, serverNow } from './format.js';
 import { renderInto } from './md.js';
 import { toast } from './notify.js';
 import { createTaste } from './taste.js';
@@ -32,6 +32,7 @@ function nowLine(a, alive) {
     const more = a.now.length > 1 ? `  +${a.now.length - 1} more` : '';
     return (s.kind === 'worker' ? `${verb(s)} · ${s.title || s.paper || ''}` : verb(s)) + more;
   }
+  if (a.retired) return `Retired after wave ${a.retired}: its cards stay in the report`;
   if (!alive) return 'The daemon is not running';
   if (a.paused) return 'Paused. No new papers, no searching.';
   if (a.saturated) return 'Searches stopped finding new papers';
@@ -82,11 +83,14 @@ export function createResearch() {
   const stats = h('div.r-stats.card', null, stat(nCards, 'cards'), stat(nQueued, 'queued'), stat(nRate, 'per hour'), stat(nLeft, 'left'));
   const rawEl = h('button.r-raw.mono', { title: 'The daemon\'s own status line', onclick: () => rawEl.classList.toggle('open') });
   const synthBtn = h('button.btn', { hidden: true, onclick: () => openDoc('Synthesis', 'synthesis') }, icon('layers', 15), 'Synthesis');
+  const reportBtn = h('button.btn.brand', { hidden: true, title: 'Where the research stands, one chapter per wave, and the answer', onclick: () => openDoc('Report', 'living') }, icon('file', 15), 'Report');
+  const knowBtn = h('button.btn', { hidden: true, title: 'The compact state of knowledge every agent reads at each step', onclick: () => openDoc('State of knowledge', 'knowledge') }, icon('layers', 15), 'What we know');
+  const memBtn = h('button.btn', { title: 'What the agents keep after a run: lessons, your preferences, facts, sources', onclick: () => openMemory() }, icon('crew', 15), 'Memory');
   const newBtn = h('button.btn.brand', { onclick: () => openMission() }, icon('plus', 15), 'New mission');
   const actions = h('div.r-actions', null,
-    newBtn,
+    reportBtn, newBtn, knowBtn,
     h('button.btn', { onclick: () => openDoc('Status', 'status') }, icon('log', 15), 'Status'),
-    synthBtn);
+    synthBtn, memBtn);
   const hero = h('header.r-hero', null,
     h('div.r-eyebrow', null, liveDot, eyebrowText, h('span.spacer'), missionSel),
     titleEl, ledeEl, pulseEl, stats, rawEl, actions);
@@ -106,7 +110,15 @@ export function createResearch() {
   const cmdCard = h('section.card.r-card', { hidden: true }, h('div.r-card-head', null, h('h2.r-h2', null, 'Your commands')), cmdList);
   const feedCard = h('section.card.r-card', { hidden: true }, h('div.r-card-head', null, h('h2.r-h2', null, 'Latest')), feedList);
   const empty = h('div.r-empty', { hidden: true });
-  const bodyEl = h('div.r-body', null, banner, grid, h('div.r-lower', null, allCard, cmdCard, feedCard));
+  // ---------- waves (continuous runs: research/waves.py) ----------
+  const waveNow = h('div.w-now');
+  const waveSub = h('div.r-row-sub');
+  const waveBar = h('div.w-bar', null, h('span'));
+  const waveList = h('div.w-list');
+  const waveCard = h('section.card.r-card.w-card', { hidden: true },
+    h('div.r-card-head', null, h('h2.r-h2', null, 'Waves'), h('span.micro', null, 'each wave: read, write a chapter, compact, forget, re-plan')),
+    waveNow, waveBar, waveSub, waveList);
+  const bodyEl = h('div.r-body', null, banner, waveCard, grid, h('div.r-lower', null, allCard, cmdCard, feedCard));
   const taste = createTaste({ onChange: () => setTimeout(tick, 400) });
   const el = h('div.view.research', { 'data-view': 'research' }, h('div.r-scroll.scroll', null, h('div.r-col', null, hero, taste.el, bodyEl, empty)));
   allIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendAll(); } });
@@ -192,6 +204,9 @@ export function createResearch() {
     setText(nLeft, leftText(st.left_m));
     setText(rawEl, m.status_line || 'no status line yet');
     synthBtn.hidden = !m.has_synthesis;
+    reportBtn.hidden = !m.has_report;
+    knowBtn.hidden = !m.has_knowledge;
+    paintWaves(m.waves || {}, alive, done);
 
     // mission switcher (only when there is more than one)
     const ms = d.missions || [];
@@ -293,6 +308,76 @@ export function createResearch() {
     const r = await command({ cmd: 'instruct', track: 'all', text }, 'Sent to every agent');
     allBtn.disabled = false;
     if (r) { allIn.value = ''; allFit(); }
+  }
+
+  function paintWaves(w, alive, done) {
+    waveCard.hidden = !w.on;
+    if (!w.on) return;
+    const now = serverNow();
+    const total = Math.max((w.ends || 0) - (w.started || 0), 1);
+    const left = Math.max((w.ends || 0) - now, 0);
+    if (w.closed || done) {
+      setText(waveNow, `${(w.history || []).length} waves, finished`);
+      waveBar.firstChild.style.width = '100%';
+      setText(waveSub, 'The report holds one chapter per wave and the answer at the top.');
+    } else {
+      setText(waveNow, `Wave ${w.n}` + (alive ? (left > 30 ? ` · turns over in ${fmtDur(left, true)}` : ' · turning over now') : ''));
+      waveBar.firstChild.style.width = Math.min(100, Math.round(100 * (1 - left / total))) + '%';
+      setText(waveSub, `${Math.round((w.wave_s || 0) / 60)} min per wave. At the turnover the deep model writes the chapter, compacts what the team knows, `
+        + 'updates long-term memory and re-plans; then every agent starts fresh from that state.'
+        + ((w.plan_changes || []).length ? ` Last re-plan: ${w.plan_changes.slice(0, 4).join('; ')}.` : ''));
+    }
+    const sigw = sig((w.history || []).map((x) => [x.n, x.headline]));
+    if (waveList.dataset.sig === sigw) return;
+    waveList.dataset.sig = sigw;
+    clear(waveList);
+    for (const x of (w.history || []).slice().reverse()) {
+      waveList.appendChild(h('button.w-row', { onclick: () => openDoc('Report', 'living') },
+        h('span.w-n', null, String(x.n)),
+        h('div.r-row-text', null, h('div', null, x.headline || `Wave ${x.n}`),
+          h('div.r-row-sub', null, `${x.cards || 0} papers · ${fmtClock(x.started, false)}–${fmtClock(x.ended, false)}`
+            + ((x.memory || []).length ? ` · memory: ${x.memory.slice(0, 2).join('; ')}` : '')))));
+    }
+    if (!(w.history || []).length) waveList.appendChild(h('div.r-row-sub', null, 'The first chapter is written when wave 1 ends.'));
+  }
+
+  // ---------- long-term memory ----------
+  const MEM_LABEL = { owner: 'you', lesson: 'lesson', fact: 'fact', source: 'source' };
+  async function openMemory() {
+    const list = h('div.r-list');
+    const qIn = h('input.input', { placeholder: 'Search memory…', 'aria-label': 'Search memory' });
+    const note = h('p.r-row-sub', null, 'What the agents keep after a run ends: what you like and distrust, search lessons, durable facts with their papers, good sources. '
+      + 'Every run starts from it; the gardener adds, updates and deletes a few at each wave. Delete anything wrong.');
+    const body = h('div.r-agent', null, note, qIn, list);
+    const s = openSheet('memory', 'lilac', h('div.r-sheet-title', null, h('h2.r-h2', null, 'Long-term memory'), h('div.r-sheet-sub', null, 'kept across runs')), body);
+    async function load() {
+      clear(list).appendChild(h('div.r-skel', null, h('i'), h('i')));
+      try {
+        const r = await get('/api/longmem' + (qIn.value.trim() ? '?q=' + enc(qIn.value.trim()) : ''));
+        clear(list);
+        if (!r.memories.length) list.appendChild(h('div.empty-note', null, qIn.value ? 'Nothing matches.' : 'Empty so far. The first wave (or the end of an instant run) writes the first memories.'));
+        for (const m of r.memories) {
+          const delBtn = h('button.btn.ghost.sm', { title: 'Delete this memory', onclick: async (e) => {
+            e.stopPropagation();
+            if (!delBtn.classList.contains('armed')) { delBtn.classList.add('armed'); setText(delBtn, 'Delete?'); setTimeout(() => { delBtn.classList.remove('armed'); setText(delBtn, 'Delete'); }, 3000); return; }
+            try { await del('/api/longmem/' + enc(m.name)); toast('Memory deleted', { tone: 'mint', timeout: 2500 }); load(); } catch (ex) { toast('Not deleted', { sub: ex.message, tone: 'coral' }); }
+          } }, 'Delete');
+          list.appendChild(h('div.r-row.mem-row', { onclick: async () => {
+            try {
+              const one = await get('/api/longmem/' + enc(m.name));
+              setText(s.docTitle, m.name); s.docLink.hidden = true;
+              renderInto(s.docBody, `**${MEM_LABEL[one.type] || one.type}** · ${one.description}\n\n${one.body}\n\n_from ${one.source || 'unknown'} · updated ${one.updated || ''} · used ${one.uses || 0} times_`);
+              s.main.hidden = true; s.docEl.hidden = false;
+            } catch (ex) { toast('Could not open', { sub: ex.message, tone: 'coral' }); }
+          } },
+            h('span', { class: 'mem-type t-' + m.type }, MEM_LABEL[m.type] || m.type),
+            h('div.r-row-text', null, h('div', null, m.name), h('div.r-row-sub', null, m.description)), delBtn));
+        }
+      } catch (e) { clear(list).appendChild(h('div.empty-note', null, e.message)); }
+    }
+    let t = 0;
+    qIn.addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 300); });
+    load();
   }
 
   // ---------- sheet shell (bottom sheet on a phone, side panel on a wide screen) ----------

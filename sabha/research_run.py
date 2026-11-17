@@ -21,8 +21,9 @@ import time
 import zipfile
 from pathlib import Path
 
-from .research import inbox as rinbox
+from .research import inbox as rinbox, longmem
 from .research.memory import read_json, write, write_json
+from .research.waves import auto_wave_minutes
 from .util import ApiError, IS_WINDOWS, group_kwargs
 
 log = logging.getLogger("sabha.research.run")
@@ -38,6 +39,9 @@ SYNTHESIS_QUESTIONS = (
 MARKS = {"daemon": ("sabha.research.run", "sabha.research.mock"), "harvest": ("sabha.research.harvest",),
          "index": ("sabha.research.index",)}
 SKIP_IN_ZIP = ("scratch", ".git")
+INSTANT_HOURS = 0.34       # one pass: plan 2-3 tracks, read what fits, answer (about 20 minutes)
+SESSION_MARGIN_H = 0.25    # "until the session ends" stops this long before the box's 12 h clock runs out
+DEMO_WAVE_S = 14           # demo mode: a continuous run turns a wave over every few seconds
 
 
 def pid_alive(pid: int, marks: tuple[str, ...] = ()) -> bool:
@@ -161,6 +165,7 @@ class Runner:
             write_json(str(self.state_path), st)
         return {"running": running, "mission": st.get("mission") or "", "started": st.get("started") or 0,
                 "until": st.get("until") or 0, "hours": st.get("hours") or 0, "mock": bool(st.get("mock")),
+                "mode": st.get("mode") or "", "wave_min": st.get("wave_min") or 0,
                 "finishing": bool(running and st.get("finishing")), "ended": st.get("ended") or 0, "how": st.get("how") or "",
                 "git_sync": os.path.isdir(os.path.join(self.repo, ".git")),
                 "log": str(self.logs / "research.log")}
@@ -232,7 +237,7 @@ class Runner:
         if self.status()["running"]:
             raise ApiError(409, "a research run is already going: stop it first")
         hub = self.hub
-        fields = {k: body[k] for k in ("taste", "topic", "loves", "hours") if k in body}
+        fields = {k: body[k] for k in ("taste", "topic", "loves", "hours", "mode", "wave_min") if k in body}
         taste = hub.taste.save(fields) if fields else hub.taste.load()
         if len(taste["topic"].strip()) < 12:
             raise ApiError(400, "write the question or topic of this run first (a sentence or more)")
@@ -243,8 +248,8 @@ class Runner:
                                 "(research uses the models served as 'reader' and 'deep')")
         note = "" if demo else self._git_setup()
         title, brief, taste_md = build_mission(taste)
-        hours = float(taste["hours"])
-        mid = rinbox.new_mission(self.repo, title, brief, "queue", hours)
+        hours, wave_min, extra = self.run_shape(taste)
+        mid = rinbox.new_mission(self.repo, title, brief, "queue", hours, extra)
         mroot = os.path.join(self.repo, "missions", mid)
         if taste_md:
             write(os.path.join(mroot, "taste.md"), taste_md)
@@ -257,10 +262,15 @@ class Runner:
         env.setdefault("SABHA_INDEX_SLEEP", "3")
         if hub.settings.get("git_token"):
             env["SABHA_GIT_TOKEN"] = hub.settings.get("git_token")  # only so the daemon can mask it in its logs
+        for mdl in hub.store.models.values():  # the context window of each role's server (a switched model may differ)
+            role = (mdl.get("served_name") or "").lower()
+            if role in ("deep", "reader", "s1") and mdl.get("context_window"):
+                env[f"SABHA_CTX_{role.upper()}"] = str(int(mdl["context_window"]))
         pids: dict[str, int] = {}
         if demo:
             pids["daemon"] = self._spawn("daemon", ["-m", "sabha.research.mock", "--repo", self.repo, "--mission", mid,
-                                                    "--hours", str(hours)], env, "research.log")
+                                                    "--hours", str(hours), "--wave-s", str(DEMO_WAVE_S if wave_min else 0)],
+                                         env, "research.log")
         else:
             if "s1" not in served:
                 env.setdefault("SABHA_S1", "reader" if "reader" in served else "deep")
@@ -277,12 +287,29 @@ class Runner:
             if not find_proc("sabha.research.index"):
                 pids["index"] = self._spawn("index", ["-m", "sabha.research.index", "build", "--device", device], env, "index.log")
             pids["daemon"] = self._spawn("daemon", ["-m", "sabha.research.run", "--repo", self.repo, "--mission", mid,
-                                                    "--hours", str(hours), "--once"], env, "research.log")
+                                                    "--hours", f"{hours:.3f}", "--once", "--wave-min", f"{wave_min:g}"],
+                                         env, "research.log")
         now = time.time()
         write_json(str(self.state_path), {"mission": mid, "started": now, "until": now + hours * 3600, "hours": hours,
-                                          "pids": pids, "mock": demo, "note": note})
+                                          "pids": pids, "mock": demo, "note": note, "mode": extra["run"], "wave_min": wave_min})
         log.info("research run started: mission %s, %.1f h, pids %s", mid, hours, pids)
         return {**self.status(), "note": note, "title": title}
+
+    def run_shape(self, taste: dict) -> tuple[float, float, dict]:
+        """(hours, minutes per wave, brief front matter) from the run-length choice. Instant: one short pass with few
+        tracks. Continuous: the hours asked for (0 = until the session ends), cut into waves."""
+        if taste.get("mode") == "instant":
+            return INSTANT_HOURS, 0.0, {"run": "instant", "tracks": 3, "wave_minutes": 0}
+        hours = float(taste.get("hours") or 0)
+        left = (getattr(self.hub, "session_end", 0) - time.time()) / 3600 - SESSION_MARGIN_H
+        if hours <= 0:
+            hours = max(left, 0.5) if left > 0 else 6.0
+        elif left > 0.5:
+            hours = min(hours, left)
+        wave = float(taste.get("wave_min") or 0) or auto_wave_minutes(hours)
+        if wave and wave * 60 > hours * 3600 * 0.6:  # a wave longer than most of the run is one pass
+            wave = 0.0
+        return round(hours, 3), wave, {"run": "continuous" if wave else "one pass", "wave_minutes": f"{wave:g}"}
 
     # ------------------------------------------------------------ stop
 
@@ -326,6 +353,10 @@ class Runner:
                        "Sabha research results.\n\nsynthesis.md        the answer, written at half time and at the end\n"
                        "tracks/<t>/report.md  one report per agent (track)\ntracks/<t>/digest.md  what the agent believes, from its claims ledger\n"
                        "cards/<id>.md       one card per paper read, every fact with a checked quote\n"
+                       "REPORT.md           the living report: where we stand, one chapter per wave, the answer\n"
+                       "knowledge.md        the compact state of knowledge every agent read at each step\n"
+                       "waves/wNN.md        each wave's chapter\n"
+                       "longterm-memory/    what the agents keep for later runs (one file per memory)\n"
                        "STATUS.md, DIGEST.md  the run's own status pages\nbrief.md, taste.md  what you asked for\n"
                        "memory/, state/     registry of every paper seen, events, queries (JSON lines)\n")
             for dirpath, dirnames, filenames in os.walk(root):
@@ -339,6 +370,13 @@ class Runner:
                         n += 1
                     except OSError:
                         pass
+            home = longmem.home_for(self.repo)
+            for p in sorted(Path(home).glob("*.md")) if os.path.isdir(home) else []:
+                try:
+                    z.write(str(p), f"{mission_id}/longterm-memory/{p.name}")
+                    n += 1
+                except OSError:
+                    pass
         log.info("export %s: %d files, %d bytes", mission_id, n, buf.tell())
         return f"sabha-research-{mission_id}.zip", buf.getvalue()
 

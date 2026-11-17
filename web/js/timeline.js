@@ -19,9 +19,14 @@ export function createTimeline({ onJump } = {}) {
   const hint = h('div.tl-hint.micro', null, 'scroll to zoom · drag to pan · click to replay · double-click for the whole session');
   const el = h('div.timeline', null, canvas, replayLine, hoverLine, hint);
   const ctx = canvas.getContext('2d');
-  const INK = rgbOf('ink');
+  let INK = rgbOf('ink');
   const colors = {};
-  for (const k of KIND_CODE) colors[k] = KINDS[k][1] === 'ink' ? rgba(INK, k === 'text' ? 0.35 : 0.2) : rgba(rgbOf(KINDS[k][1]), 0.9);
+  const paintColors = () => {
+    INK = rgbOf('ink');
+    for (const k of KIND_CODE) colors[k] = KINDS[k][1] === 'ink' ? rgba(INK, k === 'text' ? 0.35 : 0.2) : rgba(rgbOf(KINDS[k][1]), 0.9);
+  };
+  paintColors();
+  addEventListener('sabha-theme', () => { paintColors(); dirty = true; });
   let W = 0, H = 0, dpr = 1, gutter = 92, view = null, dirty = true, visible = false, replayTs = null;
   const AXIS = 18;
 

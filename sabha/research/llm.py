@@ -17,12 +17,20 @@ import urllib.request
 
 # role: (served name, port, max concurrent, context length)
 ROLES = {"s1": ("s1", 8003, 16, 4096), "deep": ("deep", 8001, 4, 16384), "reader": ("reader", 8002, 6, 20480)}
+for _r, (_n, _p, _c, _ctx) in list(ROLES.items()):  # a model switched in the app may have a smaller window (SABHA_CTX_DEEP=...)
+    try:
+        _srv = int(__import__("os").environ.get(f"SABHA_CTX_{_r.upper()}") or 0)
+    except ValueError:
+        _srv = 0
+    if _srv:
+        ROLES[_r] = (_n, _p, _c, min(_ctx, max(_srv - 1024, 4096)))
 FALLBACK = {"s1": ["reader", "deep"], "reader": ["deep"], "deep": ["reader"]}
 _sem = {r: threading.BoundedSemaphore(v[2]) for r, v in ROLES.items()}
 _health: dict[str, tuple[float, bool]] = {}
 _lock = threading.Lock()
 STATS = {r: {"calls": 0, "fail": 0, "tok": 0, "sec": 0.0, "fallback": 0} for r in ROLES}
 OVERRIDE: dict[str, str] = {}  # e.g. {"s1": "reader"} after a failed triage calibration
+WAIT_DOWN_S = float(__import__("os").environ.get("SABHA_LLM_WAIT_S") or 1500)  # how long a call waits for a restarting server
 
 
 class LLMError(Exception):
@@ -109,7 +117,10 @@ def repair_json(s: str):
 def chat(role: str, system: str, user: str, max_tokens: int = 800, schema: dict | None = None,
          temperature: float = 0.2, timeout: float = 240, tries: int = 6) -> str:
     last = ""
-    for attempt in range(tries):
+    t_first = time.time()
+    attempt = -1
+    while attempt + 1 < tries:
+        attempt += 1
         r = pick(role)
         name, port, _, ctx = ROLES[r]
         body = {"model": name, "max_tokens": max_tokens, "temperature": temperature,
@@ -142,6 +153,10 @@ def chat(role: str, system: str, user: str, max_tokens: int = 800, schema: dict 
             with _lock:
                 STATS[r]["fail"] += 1
             _health.pop(r, None)
+            if isinstance(e, urllib.error.URLError) and time.time() - t_first < WAIT_DOWN_S:
+                attempt -= 1  # no server on the port (a model switch, a restart): wait for it, the tries are for real errors
+                time.sleep(30)
+                continue
             time.sleep(min(20 * (attempt + 1), 90))
             continue
         ch = d["choices"][0]

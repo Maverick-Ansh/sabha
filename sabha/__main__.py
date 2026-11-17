@@ -140,6 +140,7 @@ async def serve(cfg: Config, tunnel_kind: str, models: list[str] | None = None, 
         info.append(f"token:  {cfg.token}")
     _banner(info)
     print(f"Sabha link: {public_link or local_link}", flush=True)
+    hub.notifier.on_link(public_link or local_link)  # the owner's phone gets the link at once (sabha/notify.py)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

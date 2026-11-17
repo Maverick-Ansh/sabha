@@ -17,7 +17,8 @@ Environment (all optional)
     SABHA_KEEPALIVE=0      `up` returns as soon as the link is printed (no heartbeat loop)
     SABHA_NEW_LINK=1       restart only the hub, for a fresh tunnel link (models keep running)
     SABHA_MODELS=0         start no model servers (hub only)
-    SABHA_DEEP_MODEL, SABHA_READER_MODEL    Hugging Face ids of the two models
+    SABHA_DEEP_MODEL, SABHA_READER_MODEL    Hugging Face ids of the two models (first boot; the app's Models
+                           panel writes <data>/run/layout.json, and the supervisor switches models live)
     SABHA_BASE, SABHA_DATA, SABHA_PORT, SABHA_TUNNEL (cloudflared | ngrok | none), SABHA_TOKEN
     TAVILY_API_KEY, HF_TOKEN, SABHA_GIT_REPO, SABHA_GIT_TOKEN    also read from Kaggle / Colab secrets;
                            they fill empty fields of <data>/settings.json (the app can change them later)
@@ -37,6 +38,9 @@ import urllib.error
 import urllib.request
 
 APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if APP not in sys.path:  # `python sabha/box.py` puts sabha/ on the path, not the repo: the catalog lives in the package
+    sys.path.insert(0, APP)
+from sabha import catalog  # noqa: E402  (standard library only, like this file)
 
 
 def _base() -> str:
@@ -56,12 +60,22 @@ PORT = int(os.environ.get("SABHA_PORT") or 8787)
 TUNNEL = os.environ.get("SABHA_TUNNEL") or "cloudflared"
 BOOT = os.path.join(DATA, "boot.json")
 SETTINGS = os.path.join(DATA, "settings.json")
+LAYOUT = os.path.join(RUN, "layout.json")  # which model serves which role on which GPUs (sabha/catalog.py; the app writes it)
 HUB_MARK = f"-m sabha --host 127.0.0.1 --port {PORT} "
 SUP_MARK = "box.py supervise"
 SESSION_S = 11.5 * 3600
 BEAT_S = 240
 SECRET_NAMES = {"TAVILY_API_KEY": "tavily_key", "HF_TOKEN": "hf_token",
                 "SABHA_GIT_REPO": "git_repo", "SABHA_GIT_TOKEN": "git_token"}
+NOTIFY = os.path.join(DATA, "notify.json")
+NOTIFY_SECRETS = {  # secret name -> (channel, field); the same table as SECRET_ENV in sabha/notify.py
+    "NTFY_TOPIC": ("ntfy", "topic"), "TELEGRAM_BOT_TOKEN": ("telegram", "bot_token"), "TELEGRAM_CHAT_ID": ("telegram", "chat_id"),
+    "WHATSAPP_PHONE": ("whatsapp", "phone"), "CALLMEBOT_KEY": ("whatsapp", "apikey"),
+    "SMTP_HOST": ("email", "host"), "SMTP_PORT": ("email", "port"), "SMTP_USER": ("email", "user"),
+    "SMTP_PASSWORD": ("email", "password"), "NOTIFY_EMAIL": ("email", "to"),
+    "TWILIO_SID": ("call", "twilio_sid"), "TWILIO_TOKEN": ("call", "twilio_token"), "TWILIO_FROM": ("call", "twilio_from"),
+    "CALL_TO": ("call", "to"), "CALL_TELEGRAM_USER": ("call", "telegram_user"),
+}
 NO_THINK = {"chat_template_kwargs": {"enable_thinking": False}}
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 LOG_PREFIX = re.compile(r"^(\(\w+ pid=\d+\)\s*)?((INFO|WARNING|ERROR|DEBUG)\s+[\d\-]+\s+[\d:]+\s*)?(\[[^\]]*\]\s*)?")
@@ -236,7 +250,20 @@ def import_secrets() -> list[str]:
             got.append(name)
     if got:
         write_json(SETTINGS, cur, 0o600)
-    return got
+    note = read_json(NOTIFY, {}) or {}
+    n_got = []
+    for name, (ch, field) in NOTIFY_SECRETS.items():
+        if (note.get(ch) or {}).get(field):
+            continue
+        v = secret(name)
+        if v:
+            note.setdefault(ch, {})[field] = v
+            n_got.append(name)
+    if n_got:
+        if (note.get("call") or {}).get("telegram_user") and not (note["call"].get("twilio_sid")):
+            note["call"].setdefault("provider", "telegram")
+        write_json(NOTIFY, note, 0o600)
+    return got + n_got
 
 
 # ---------------------------------------------------------------- GPUs and the model layout
@@ -259,9 +286,42 @@ def gpus() -> list[dict]:
     return rows
 
 
+def _as_model(srv: dict) -> dict:
+    """A layout.json server -> the dict the supervisor and serve.sh use."""
+    gp = [int(x) for x in srv.get("gpus") or [0]]
+    m = {"role": srv["role"], "name": srv.get("name") or f"{srv.get('label') or srv['hf']} ({srv['role']})", "hf": srv["hf"],
+         "gpu": ",".join(map(str, gp)), "gpus": gp, "tp": int(srv.get("tp") or len(gp)), "port": int(srv.get("port") or catalog.PORTS.get(srv["role"], 8003)),
+         "util": f"{float(srv.get('util') or 0.9):.2f}", "ctx": int(srv.get("ctx") or 32768), "seqs": int(srv.get("seqs") or 8),
+         "dtype": srv.get("dtype") or "float16", "tool_parser": srv.get("tool_parser", "qwen3_xml"),
+         "reasoning_parser": srv.get("reasoning_parser", "qwen3"), "mm": bool(srv.get("mm", True)),
+         "no_think": bool(srv.get("no_think", True)), "label": srv.get("label") or srv["hf"].split("/")[-1]}
+    m["sig"] = "|".join(str(m[k]) for k in ("hf", "gpu", "tp", "util", "ctx", "seqs", "dtype", "tool_parser", "reasoning_parser", "mm"))
+    return m
+
+
+def default_servers(ok: list[dict]) -> list[dict]:
+    """First boot: the catalog's default preset for these GPUs. Measured on Kaggle 2x T4: the 9B AWQ needs a GPU to
+    itself, the reader shares GPU 1 with the embedding index (util 0.85). Context 32768: a Work run filled 20480."""
+    pre = catalog.presets(ok)
+    servers = [dict(x) for x in pre[0]["servers"]] if pre else []
+    for srv in servers:
+        hf = os.environ.get("SABHA_DEEP_MODEL" if srv["role"] == "deep" else "SABHA_READER_MODEL")
+        if hf and hf != srv["hf"]:
+            m = catalog.entry(hf) or {"hf": hf, "label": hf.split("/")[-1], "family": catalog.family_of(hf), "weights_gib": 9,
+                                      "kv_kib": 32, "min_sm": 75, "max_ctx": 32768}
+            srv.update({k: v for k, v in catalog.server(srv["role"], m, {"gpus": srv["gpus"], "tp": srv["tp"], "util": srv["util"],
+                                                                          "ctx": srv["ctx"], "fits": "yes"}, ok).items()
+                        if k not in ("gpus", "tp", "util", "port")})
+        if srv["role"] == "reader" and len(ok) >= 2:
+            srv["util"] = 0.85
+        env_ctx = os.environ.get("SABHA_DEEP_CTX" if srv["role"] == "deep" else "SABHA_READER_CTX")
+        if env_ctx:
+            srv["ctx"] = int(env_ctx)
+    return servers
+
+
 def layout(g: list[dict]) -> tuple[list[dict], str]:
-    """(models to serve, problem). Measured on Kaggle 2x T4: the 9B AWQ needs a GPU to itself. Context 32768 for both:
-    a Work run (dsh system prompt + fetched pages) filled a 20480 window by its third step; both servers start at 32768."""
+    """(models to serve, problem). The saved layout (the app's Models panel) when it fits these GPUs, else the default."""
     if os.environ.get("SABHA_MODELS", "1") == "0":
         return [], ""
     if not g:
@@ -273,16 +333,13 @@ def layout(g: list[dict]) -> tuple[list[dict], str]:
     ok = [x for x in g if x["mem_mb"] >= 14000]
     if not ok:
         return [], f"The GPU has {g[0]['mem_mb']} MB of memory; the models need a 15 GB card (a T4 or larger)."
-    reader = {"role": "reader", "name": "Qwen3.5-4B (reader)", "hf": os.environ.get("SABHA_READER_MODEL") or "Qwen/Qwen3.5-4B",
-              "port": 8002, "util": "0.85", "ctx": int(os.environ.get("SABHA_READER_CTX") or 32768), "seqs": 8}
-    if len(ok) >= 2:
-        deep = {"role": "deep", "name": "Qwen3.5-9B 4-bit (deep)",
-                "hf": os.environ.get("SABHA_DEEP_MODEL") or "cyankiwi/Qwen3.5-9B-AWQ-4bit", "gpu": ok[0]["index"],
-                "port": 8001, "util": "0.90", "ctx": int(os.environ.get("SABHA_DEEP_CTX") or 32768), "seqs": 8}
-        reader["gpu"] = ok[1]["index"]
-        return [deep, reader], ""
-    reader["gpu"] = ok[0]["index"]
-    return [reader], ""
+    have = {x["index"] for x in ok}
+    saved = [x for x in (read_json(LAYOUT, {}) or {}).get("servers") or []
+             if isinstance(x, dict) and x.get("hf") and x.get("role") and set(x.get("gpus") or [0]) <= have]
+    servers = saved or default_servers(ok)
+    if not saved and servers:
+        write_json(LAYOUT, {"servers": servers, "by": "default for " + ", ".join(x["name"] for x in ok), "ts": time.time()})
+    return [_as_model(x) for x in servers], ""
 
 
 # ---------------------------------------------------------------- up (the notebook cell)
@@ -457,6 +514,23 @@ class Boot:
     def get(self, sid: str) -> dict:
         return next((s for s in self.d["steps"] if s["id"] == sid), {})
 
+    def ensure(self, m: dict) -> None:
+        """A step for model m (a model switched in the app gets a fresh step; the old one is replaced)."""
+        sid = "model:" + m["role"]
+        with self.lock:
+            fresh = {"id": sid, "short": m["role"], "label": f"{m['name']} on GPU {m['gpu']}", "status": "waiting",
+                     "detail": "waits for the tools", "since": time.time(), "secs": 0, "expect_s": 600, "model": m["hf"], "port": m["port"]}
+            for i, s in enumerate(self.d["steps"]):
+                if s["id"] == sid:
+                    if s.get("model") != m["hf"] or s.get("label") != fresh["label"]:
+                        self.d["steps"][i] = fresh
+                    return
+            self.d["steps"].append(fresh)
+
+    def drop(self, sid: str) -> None:
+        with self.lock:
+            self.d["steps"] = [s for s in self.d["steps"] if s["id"] != sid]
+
     def save(self) -> None:
         with self.lock:
             t = time.time()
@@ -537,8 +611,24 @@ def start_server(m: dict) -> None:
     role = m["role"]
     if find(f"serve.sh {role} ") or port_up(m["port"]):
         return
+    env = box_env()
+    env.update(SABHA_TOOL_PARSER=m.get("tool_parser") or "", SABHA_REASONING_PARSER=m.get("reasoning_parser") or "",
+               SABHA_MM="1" if m.get("mm") else "0", SABHA_DTYPE=m.get("dtype") or "float16", SABHA_TP=str(m.get("tp") or 1))
     spawn(["bash", os.path.join(APP, "sabha", "research", "serve.sh"), role, str(m["gpu"]), str(m["port"]), m["hf"],
-           m["util"], str(m["ctx"]), str(m["seqs"])], os.path.join(LOGS, f"{role}.serve.log"))
+           m["util"], str(m["ctx"]), str(m["seqs"])], os.path.join(LOGS, f"{role}.serve.log"), env=env)
+
+
+def stop_server(role: str, port: int) -> None:
+    """Stop the keep-alive loop and the vLLM server of a role, then wait until its port is free (at most ~60 s)."""
+    pid = find(f"serve.sh {role} ")
+    if pid:
+        kill_group(pid, 2)
+    subprocess.run(["bash", os.path.join(APP, "sabha", "research", "serve.sh"), "stop", role], check=False)
+    for _ in range(30):
+        if not port_up(port):
+            break
+        time.sleep(2)
+    time.sleep(4)  # the GPU memory of the old engine comes back a moment after the port closes
 
 
 def last_log_line(role: str) -> str:
@@ -552,19 +642,44 @@ def last_log_line(role: str) -> str:
 
 
 def register(models: list[dict], token: str) -> bool:
-    """Models and a default crew in the hub, once. A model that is still loading shows as down until it answers."""
+    """Models and a default crew in the hub. One hub entry per role (named '... (deep)', '... (reader)'); a model
+    switched in the app patches its entry, so the crew keeps its seats. A role that is no longer served (one model
+    for every role) points at the deep server instead, so agents seated on it keep working."""
     hub = f"http://127.0.0.1:{PORT}"
     state = http_json("GET", hub + "/api/state", token=token)
-    have = {(x.get("served_name"), (x.get("base_url") or "").rstrip("/")): x for x in state.get("models") or []}
+    entries = state.get("models") or []
+
+    def mine(role):
+        for x in entries:
+            if (x.get("name") or "").endswith(f"({role})") or (x.get("served_name") == role and "box launcher" in (x.get("notes") or "")):
+                return x
+        return None
+
     ids = {}
+    served = {m["role"]: m for m in models}
     for m in models:
         url = f"http://127.0.0.1:{m['port']}/v1"
-        x = have.get((m["role"], url)) or http_json("POST", hub + "/api/models", {
-            "name": m["name"], "kind": "chat", "base_url": url, "served_name": m["role"], "context_window": m["ctx"],
-            "extra_body": NO_THINK, "notes": f"{m['hf']} on GPU {m['gpu']}, started by the box launcher"}, token=token)
-        if x.get("context_window") != m["ctx"]:  # registered by an older launcher: the server now has another window
-            x = http_json("PATCH", f"{hub}/api/models/{x['id']}", {"context_window": m["ctx"]}, token=token)
+        want = {"name": m["name"], "base_url": url, "served_name": m["role"], "context_window": m["ctx"],
+                "extra_body": NO_THINK if m.get("no_think") else {},
+                "notes": f"{m['hf']} on GPU {m['gpu']}, started by the box launcher"}
+        x = mine(m["role"])
+        if x is None:
+            x = http_json("POST", hub + "/api/models", {"kind": "chat", **want}, token=token)
+        elif any(x.get(k) != v for k, v in want.items()):
+            x = http_json("PATCH", f"{hub}/api/models/{x['id']}", want, token=token)
         ids[m["role"]] = x["id"]
+    deep = served.get("deep") or (models[0] if models else None)
+    for role in ("deep", "reader"):
+        if role in served or deep is None:
+            continue
+        x = mine(role)
+        if x is not None:
+            want = {"name": f"{deep['label']} (also {role})", "base_url": f"http://127.0.0.1:{deep['port']}/v1",
+                    "served_name": deep["role"], "context_window": deep["ctx"], "extra_body": NO_THINK if deep.get("no_think") else {},
+                    "notes": f"{role} role served by the {deep['role']} server ({deep['hf']}), started by the box launcher"}
+            if any(x.get(k) != v for k, v in want.items()):
+                http_json("PATCH", f"{hub}/api/models/{x['id']}", want, token=token)
+            ids[role] = x["id"]
     if ids and not state.get("agents"):
         for name, role, want, hue, persona in CREW:
             mid = ids.get(want) or next(iter(ids.values()))
@@ -585,16 +700,47 @@ def supervise() -> int:
     boot = Boot(g, models)
     if problem:
         boot.d["note"] = problem
-    say(f"[boot] gpus {g} models {[m['role'] for m in models]}")
+    say(f"[boot] gpus {g} models {[m['role'] + '=' + m['hf'] for m in models]}")
 
-    fetched = {m["role"]: threading.Event() for m in models}
+    fetched: dict[str, threading.Event] = {}
+
+    def fetch(m: dict) -> None:
+        ev = threading.Event()
+        fetched[m["role"]] = ev
+        threading.Thread(target=prefetch, args=(boot, m, ev), daemon=True).start()
+
     for m in models:
-        threading.Thread(target=prefetch, args=(boot, m, fetched[m["role"]]), daemon=True).start()
+        fetch(m)
     setup_ok: list[bool] = []
     threading.Thread(target=lambda: setup_ok.append(run_setup(boot, bool(models))), daemon=True).start()
 
-    registered, launched, t_end = False, set(), time.time() + 12 * 3600
+    registered, launched, t_end = False, {}, time.time() + 12 * 3600  # launched: role -> signature of what runs
+    layout_mtime = os.path.getmtime(LAYOUT) if os.path.exists(LAYOUT) else 0
     while time.time() < t_end:
+        mt = os.path.getmtime(LAYOUT) if os.path.exists(LAYOUT) else 0
+        if mt != layout_mtime:  # the app's Models panel switched a model: apply it live
+            layout_mtime = mt
+            new, problem = layout(g)
+            if not problem:
+                old = {m["role"]: m for m in models}
+                now_roles = {m["role"] for m in new}
+                for role, m in old.items():
+                    nm = next((x for x in new if x["role"] == role), None)
+                    if nm is None or nm["sig"] != m["sig"]:
+                        say(f"[boot] switching {role}: {m['hf']} -> {nm['hf'] if nm else '(none)'}")
+                        stop_server(role, m["port"])
+                        launched.pop(role, None)
+                        if nm is None:
+                            boot.drop("model:" + role)
+                for m in new:
+                    if m["role"] not in old or old[m["role"]]["sig"] != m["sig"]:
+                        boot.ensure(m)
+                        fetch(m)
+                models = new
+                boot.d["ready"] = False
+                boot.d["stage"] = "models"
+                registered = False
+                say(f"[boot] layout now {[m['role'] + '=' + m['hf'] for m in models]} (roles {sorted(now_roles)})")
         if not registered:
             try:
                 registered = register(models, token)
@@ -612,16 +758,20 @@ def supervise() -> int:
             return 1
         for m in models:
             sid, role = "model:" + m["role"], m["role"]
-            if port_up(m["port"]):
+            if port_up(m["port"]) and launched.get(role) in (None, m["sig"]):
                 if boot.get(sid).get("status") != "ready":
                     boot.step(sid, status="ready", detail="ready")
-                    say(f"[boot] {role} is ready")
+                    say(f"[boot] {role} is ready ({m['hf']})")
+                launched.setdefault(role, m["sig"])
                 continue
-            if not setup_ok or not fetched[role].is_set():
+            if not setup_ok or not fetched.get(role, threading.Event()).is_set():
                 continue
             if role not in launched or not find(f"serve.sh {role} "):
+                if role not in launched and any(o is not m and set(o["gpus"]) & set(m["gpus"]) and o["role"] in launched
+                                                and not port_up(o["port"]) for o in models):
+                    continue  # two servers on one GPU: the second starts after the first is up (both profile memory)
                 start_server(m)
-                launched.add(role)
+                launched[role] = m["sig"]
                 boot.step(sid, status="starting", detail="starting the model server")
                 boot.d["stage"] = "models"
                 continue
@@ -629,7 +779,7 @@ def supervise() -> int:
             boot.step(sid, status="starting", detail=("stopped answering; restarting. " if was_ready else "") +
                       (last_log_line(role) or "loading the weights, then warming up (about 10 min the first time)"))
         boot.save()
-        time.sleep(5 if not boot.d["ready"] else 30)
+        time.sleep(5 if not boot.d["ready"] else 15)
     return 0
 
 

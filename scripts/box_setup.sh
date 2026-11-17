@@ -8,7 +8,7 @@
 set -u
 export PATH=/usr/local/bin:$PATH
 DSH_VERSION="${DSH_VERSION:-0.2.1-rc.5}"
-VLLM_SPEC="${VLLM_SPEC:-vllm}"
+VLLM_SPEC="${VLLM_SPEC:-vllm==0.33.0}"  # 0.34.0 (2026-11) fails on T4: its FlashInfer JIT norm kernel does not link (sm75)
 WANT_VLLM=1
 [ "${1:-}" = "--no-vllm" ] && WANT_VLLM=0
 

@@ -7,6 +7,7 @@ export function setClockOffset(s) { if (Number.isFinite(s)) clockOffset = s; }
 export function serverNow() { return Date.now() / 1000 + clockOffset; }
 
 const rgbCache = new Map();
+export function clearColorCache() { rgbCache.clear(); }  // the theme changed: the *-rgb tokens have new values
 export function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 // [r,g,b] from the --<name>-rgb token
 export function rgbOf(name) {

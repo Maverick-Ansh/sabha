@@ -20,7 +20,7 @@ import threading
 import time
 import traceback
 
-from . import agents as A, inbox, live, llm, sources as src
+from . import agents as A, inbox, live, llm, longmem, sources as src, waves as W
 from .index import Index
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
@@ -42,8 +42,15 @@ def margins(total_s: float) -> dict:
 
 
 class Daemon:
-    def __init__(self, repo: str, until: float, slots: int = 6, mission_id: str = "", once: bool = False):
+    def __init__(self, repo: str, until: float, slots: int = 6, mission_id: str = "", once: bool = False, wave_min: float = -1):
         self.repo, self.until, self.slots = repo, until, slots
+        self.wave_min = wave_min  # -1: from the brief (wave_minutes:), 0: no waves (one pass), >0: continuous run in waves
+        self.wave_s = 0.0
+        self.waves: dict = {}
+        self.home = longmem.home_for(repo)
+        self.turning = False                 # a wave turnover is running in its own thread
+        self.final_thread: threading.Thread | None = None  # the end of the run: final reports, last wave, synthesis
+        self.cons_lock = threading.Lock()    # one consolidation of a track at a time (maintenance and turnover both do it)
         self.mission_id, self.once = mission_id, once
         self.t_start = time.time()
         self.M = margins(until - self.t_start)
@@ -90,6 +97,18 @@ class Daemon:
         if loved:
             print(f"[run] {len(loved)} loved papers queued first", flush=True)
 
+    def setup_waves(self, m: Mission) -> None:
+        wm = self.wave_min
+        if wm < 0:
+            head = open(m.p("brief.md"), encoding="utf-8").read(600)
+            mm = re.search(r"^wave_minutes:\s*([\d.]+)", head, re.M)
+            wm = float(mm.group(1)) if mm else 0.0
+        self.wave_s = max(wm, 0.0) * 60
+        self.waves = W.start(m, self.wave_s, self.until, self.M["reports"]) if self.wave_s else {}
+        if self.waves:
+            print(f"[run] continuous: wave {self.waves['n']} of about {max(int((self.until - self.t_start) // self.wave_s), 1)}, "
+                  f"{int(self.wave_s // 60)} min each", flush=True)
+
     def finish(self) -> str:
         """The app's Finish now: final reports and the synthesis from what is in hand, then the run ends."""
         self.until = min(self.until, time.time() + self.M["synth"] + 120)
@@ -104,6 +123,9 @@ class Daemon:
     def weights(self) -> dict[str, float]:
         w = {t["id"]: float(t.get("weight", 1.0)) for t in self.m.plan["tracks"]}
         w.update({k: float(v) for k, v in (read_json(self.m.p("state", "weights.json"), {}) or {}).items() if k in w})
+        for t in self.m.plan["tracks"]:
+            if t.get("retired"):  # closed by a wave re-plan: its cards stay, it reads no more
+                w[t["id"]] = 0.0
         for tid, s in self.track_state.items():
             if s.get("saturated") and not self.m.queued(tid):
                 w[tid] = 0.0
@@ -178,8 +200,9 @@ class Daemon:
             left = self.until - time.time()
             try:
                 did = False
+                self.maybe_turnover()
                 if left > self.M["scout"]:
-                    for tid in m.track_ids():
+                    for tid in m.active_track_ids():
                         ts = self.track_state.setdefault(tid, {})
                         if ts.get("saturated") or self.weights().get(tid, 1) <= 0:
                             continue
@@ -199,7 +222,8 @@ class Daemon:
                     new = ts.get("new_cards", [])
                     if len(new) >= 8 or (new and time.time() - ts.get("last_cons", self.t_start) > 45 * 60):
                         ts["new_cards"] = []
-                        A.consolidate(m, tid, new)
+                        with self.cons_lock:
+                            A.consolidate(m, tid, new)
                         A.rebuild_playbook(m, self.steer.get("lessons", []))
                         ts["last_cons"] = time.time()
                         did = True
@@ -217,16 +241,8 @@ class Daemon:
                 if not self.synth_draft_done and time.time() > half and self.until - self.t_start >= 3 * 3600:
                     A.write_synthesis(m, final=False)
                     self.synth_draft_done = True
-                if not self.final_reports_done and left < self.M["reports"]:
-                    for tid in m.track_ids():
-                        A.write_report(m, tid)
-                    self.final_reports_done = True
-                if not self.synth_final_done and left < self.M["synth"]:
-                    A.write_synthesis(m, final=True)
-                    self.synth_final_done = True
-                    self.set_status("done")
-                    self.sync("mission done")
-                    self.stop = True
+                # the final reports and the synthesis run in their own thread (maybe_finalize, from housekeeping): this
+                # loop can sit in one scout pass for 20 minutes on a busy box (seen on a real run), past the deadline
                 if not did:
                     live.idle()
                     time.sleep(30)
@@ -235,6 +251,108 @@ class Daemon:
                 traceback.print_exc()
                 live.idle()
                 time.sleep(60)
+
+    # ------------------------------------------------------------ waves (continuous runs, research/waves.py)
+    def wave_due(self, left: float) -> bool:
+        """Time for a turnover: the wave's time is up, or every active track ran dry (nothing queued, all saturated)
+        after at least 8 minutes. Never when the time left is too short for another wave: the end closes the last one."""
+        w = self.waves
+        if left - self.M["reports"] < 0.4 * self.wave_s:
+            return False
+        if time.time() >= float(w.get("ends") or 0):
+            return True
+        act = self.m.active_track_ids()
+        dry = act and all(self.track_state.get(t, {}).get("saturated") for t in act) and not self.m.queued()
+        return bool(dry) and time.time() - float(w.get("started") or 0) > 480
+
+    def maybe_finalize(self) -> None:
+        """Start the end of the run in its own thread once the time left is under the final-reports margin."""
+        if self.final_thread is None and self.m is not None and self.until - time.time() < self.M["reports"]:
+            self.final_thread = threading.Thread(target=self._finalize, name="finalize", daemon=True)
+            self.final_thread.start()
+
+    def _finalize(self) -> None:
+        m = self.m
+        live.slot("final", "final")
+        try:
+            t0 = time.time()
+            while self.turning and time.time() - t0 < 900:
+                time.sleep(5)
+            if not self.final_reports_done:
+                for tid in m.track_ids():
+                    live.begin(step="report", track=tid)
+                    A.write_report(m, tid)
+                self.final_reports_done = True
+            self.close_run()
+            A.write_synthesis(m, final=True)
+            W.render_report(m, final=True)
+            append(m.p("state", "notify.jsonl"), {"kind": "done", "headline": W.headline_of_synthesis(m),
+                                                  "cards": m.count("carded"), "waves": len((self.waves or {}).get("history") or [])})
+            self.synth_final_done = True
+            self.set_status("done")
+            self.sync("mission done")
+        except Exception as e:
+            self.err(f"finalize: {type(e).__name__}: {str(e)[:200]}")
+            traceback.print_exc()
+        finally:
+            live.idle()
+            self.stop = True
+
+    def maybe_turnover(self) -> None:
+        """Start a wave turnover in its own thread when one is due. Called by housekeeping every 15 s: a scout pass can
+        take ten minutes (its triage queues behind the busy readers) and the turnover needs only the deep model."""
+        if (self.wave_s and self.waves and not self.waves.get("closed") and not self.turning and self.m is not None
+                and self.wave_due(self.until - time.time())):
+            self.turning = True
+            threading.Thread(target=self._turnover_thread, name="wave-turnover", daemon=True).start()
+
+    def _turnover_thread(self) -> None:
+        live.slot("waves", "waves")
+        try:
+            self.turnover()
+        except Exception as e:
+            self.err(f"turnover: {type(e).__name__}: {str(e)[:200]}")
+            traceback.print_exc()
+        finally:
+            live.idle()
+            self.turning = False
+
+    def turnover(self) -> None:
+        m = self.m
+        for tid in m.active_track_ids():  # the wave's last cards go into the ledgers before the chapter is written
+            ts = self.track_state.setdefault(tid, {})
+            new, ts["new_cards"] = ts.get("new_cards") or [], []
+            if new:
+                with self.cons_lock:
+                    A.consolidate(m, tid, new)
+        old = int(self.waves.get("n") or 1)
+        print(f"[run] wave {old} turnover", flush=True)
+        self.waves = W.turnover(m, self.waves, self.until, self.M["reports"], self.home, self.track_state)
+        for tid in m.active_track_ids():  # a fresh start for every agent: new questions, the searches may run again
+            ts = self.track_state.setdefault(tid, {})
+            ts.update(saturated=False, low_rounds=0, last_scout=0)
+        self.deficit = {}
+        A.rebuild_playbook(m, self.steer.get("lessons", []))
+        print(f"[run] wave {self.waves.get('n')} starts: {self.waves.get('plan_changes')}", flush=True)
+        self.last["status"] = 0
+        self.sync(f"wave {old} done")
+
+    def close_run(self) -> None:
+        """Before the final synthesis: close the last wave (chapter, knowledge, memory); a one-pass run tends memory once."""
+        m = self.m
+        t0 = time.time()
+        while self.turning and time.time() - t0 < 900:  # a turnover in flight finishes first
+            time.sleep(5)
+        try:
+            if self.wave_s and self.waves and not self.waves.get("closed"):
+                self.waves = W.turnover(m, self.waves, self.until, self.M["reports"], self.home, self.track_state, final=True)
+            elif not self.wave_s:
+                cards = m.cards()[:20]
+                text = "\n".join(f"- [{c['id']}] {c.get('title', '')[:100]}: {c.get('one_line', '')[:200]}" for c in cards)
+                W.garden(m, "PAPERS READ IN THIS RUN:\n" + text, self.home)
+        except Exception as e:
+            self.err(f"close_run: {type(e).__name__}: {str(e)[:200]}")
+            traceback.print_exc()
 
     # ------------------------------------------------------------ git, steering, status, digest
     def sync(self, why: str = "sync") -> bool:
@@ -473,6 +591,11 @@ class Daemon:
             if inbox.poll(self):  # commands from the phone, every pass (~15 s); STATUS shows the result at once
                 self.last["status"] = 0
             try:
+                self.maybe_finalize()
+                self.maybe_turnover()
+            except Exception as e:
+                self.err(f"turnover check: {type(e).__name__}: {str(e)[:160]}")
+            try:
                 if t - self.last["index"] > 600:
                     n = self.idx.refresh()
                     self.last["index"] = t
@@ -510,6 +633,11 @@ class Daemon:
             self.stop = False
             m = self.m
             self.budget = src.Budget(m.p("state", "budget.json"), cap=int(self.params["tavily_cap"]))
+            try:  # long-term memory: the owner's taste becomes an owner memory; the planner reads the closest memories
+                longmem.seed_owner(self.home, m.taste, read_json(m.p("loves.json"), []) or [], source=m.id)
+                W.refresh_memory_block(m, self.home)
+            except Exception as e:
+                self.err(f"long-term memory: {type(e).__name__}: {str(e)[:160]}")
             if not m.plan.get("tracks"):
                 try:
                     A.plan_mission(m)
@@ -521,6 +649,7 @@ class Daemon:
                 self.track_state, self.deficit, self.t_start = {}, {}, time.time()  # per-track state belonged to the old mission
                 self.synth_draft_done = self.synth_final_done = self.final_reports_done = False
             self._last_mid = m.id
+            self.setup_waves(m)
             self.queue_loved(m)
             self.set_status("running")
             live.bind(m.p("state", "live.json"), m.id)
@@ -540,9 +669,11 @@ class Daemon:
                 th.start()
             while not self.stop and time.time() < self.until - self.M["end"]:
                 time.sleep(20)
+            if self.final_thread is not None and self.final_thread.is_alive():
+                self.final_thread.join(timeout=1500)  # the answer is the point of the run: let it finish
             self.stop = True
             for th in threads:
-                th.join(timeout=600)
+                th.join(timeout=20 if self.synth_final_done else 600)  # after the answer only a scout may be left: do not wait on it
             self.status()
             self.digest()
             self.sync("final" if time.time() > self.until - self.M["loop"] else "mission switch")
@@ -583,9 +714,10 @@ def main() -> None:
     ap.add_argument("--test-paper", default="")
     ap.add_argument("--mission", default="", help="work on this mission id only")
     ap.add_argument("--once", action="store_true", help="exit when the mission ends instead of waiting for the next one")
+    ap.add_argument("--wave-min", type=float, default=-1, help="minutes per wave (0 = one pass, -1 = the brief's wave_minutes)")
     a = ap.parse_args()
     until = a.until or time.time() + a.hours * 3600
-    d = Daemon(a.repo, until, a.slots, a.mission, a.once)
+    d = Daemon(a.repo, until, a.slots, a.mission, a.once, a.wave_min)
     if a.test_paper:
         d.m = d.pick_mission()
         d.budget = src.Budget(d.m.p("state", "budget.json"))

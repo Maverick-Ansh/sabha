@@ -1,0 +1,94 @@
+/* Continuous runs (run length, waves, memory), the Models catalog and Alerts. Loaded before theme.css. */
+
+/* ---- run length: Instant / Continuous ---- */
+.t-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.t-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), background var(--t-fast) var(--ease); }
+.t-mode[aria-pressed="true"] { border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-soft); }
+.t-mode-l { font-weight: 600; font-size: 15px; }
+.t-mode-s { font-size: 12.5px; color: var(--ink-2); }
+.t-cont { grid-template-columns: 1fr 1fr; }
+.t-mode-note { font-size: 13px; line-height: 1.5; margin: -4px 0 0; }
+.t-more { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 12px; }
+.t-more > summary { cursor: pointer; list-style: none; color: var(--ink-2); padding: 4px 0; }
+.t-more > summary::-webkit-details-marker { display: none; }
+.t-more > summary::before { content: "+ "; }
+.t-more[open] > summary::before { content: "– "; }
+.t-more[open] { gap: 14px; }
+
+/* ---- waves ---- */
+.w-card { display: flex; flex-direction: column; gap: 8px; }
+.w-now { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.w-bar { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.w-bar > span { display: block; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--core-a), var(--core-b));
+  transition: width var(--t-slow) var(--ease); }
+.w-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.w-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 8px; border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.w-row:hover { background: var(--wash); }
+.w-n { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12.5px; font-weight: 600;
+  background: var(--brand-soft); color: var(--brand); }
+
+.r-tile.retired { opacity: .6; }
+.r-tile.retired .r-orb { background: var(--ink-3); box-shadow: none; }
+.r-tile.retired .r-state { color: var(--ink-2); background: var(--wash); }
+
+/* ---- long-term memory ---- */
+.mem-row { cursor: pointer; align-items: center; }
+.mem-type { flex: none; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 3px 8px;
+  border-radius: var(--r-pill); background: var(--wash); color: var(--ink-2); }
+.mem-type.t-owner { background: var(--rose-soft); color: var(--ink); }
+.mem-type.t-lesson { background: var(--sky-soft); color: var(--ink); }
+.mem-type.t-fact { background: var(--mint-soft); color: var(--ink); }
+.mem-type.t-source { background: var(--sun-soft); color: var(--ink); }
+
+/* ---- fit badges (Models, Alerts) ---- */
+.fit { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--r-pill); vertical-align: 1px; white-space: nowrap; }
+.fit-mint { background: var(--mint-soft); color: var(--ink); }
+.fit-sun { background: var(--sun-soft); color: var(--ink); }
+.fit-coral { background: var(--coral-soft); color: var(--ink); }
+
+/* ---- Models (box.js) ---- */
+.bx-sub { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; margin: 0; }
+.bx-sub.mono { font-family: var(--f-mono); font-size: 11.5px; }
+.so-sec { display: flex; flex-direction: column; gap: 8px; }
+.so-h { margin: 6px 0 0; font-size: 13px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--ink-2); }
+.bx-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.bx-gpus { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13.5px; }
+.bx-layout { display: flex; flex-direction: column; gap: 6px; }
+.bx-srv { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--card); border: 1px solid var(--line); }
+.bx-srv-text { flex: 1; min-width: 0; }
+.bx-srv-text .micro { overflow-wrap: anywhere; }
+.bx-role { flex: none; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--brand); width: 52px; }
+.bx-st { flex: none; font-size: 12px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--wash); }
+.bx-st.st-ready { background: var(--mint-soft); }
+.bx-st.st-failed { background: var(--coral-soft); }
+.bx-st.st-downloading, .bx-st.st-starting, .bx-st.st-waiting { background: var(--sun-soft); }
+.bx-presets, .bx-list { display: flex; flex-direction: column; gap: 6px; }
+.bx-pre, .bx-row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--card); }
+.bx-pre.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.bx-pre-text, .bx-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.bx-pre-text .micro, .bx-row-text .micro { overflow-wrap: anywhere; }
+.bx-pre-t, .bx-row-t { font-weight: 600; font-size: 14.5px; }
+.bx-btns { flex: none; display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.btn.armed { background: var(--coral-soft); border-color: var(--coral); }
+
+/* ---- Alerts (alerts.js) ---- */
+.al-lede { margin: 0; line-height: 1.5; }
+.al-cards { display: flex; flex-direction: column; gap: 8px; }
+.al-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.al-card.on { border-color: var(--mint); }
+.al-sum { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; }
+.al-sum::-webkit-details-marker { display: none; }
+.al-card > p { margin: 0; line-height: 1.5; }
+.al-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.al-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+@media (max-width: 480px) { .so-head .so-title { font-size: 19px; } }
+@media (max-width: 640px) {
+  .t-cont, .al-grid { grid-template-columns: 1fr; }
+  .t-mode { padding: 14px; }
+  .bx-pre, .bx-row { flex-direction: column; align-items: stretch; }
+  .bx-btns { flex-direction: row; flex-wrap: wrap; }
+}

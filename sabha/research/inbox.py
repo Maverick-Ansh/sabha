@@ -111,7 +111,7 @@ def directives(mroot: str) -> dict:
             "paused": dict(d.get("paused") or {})}
 
 
-def new_mission(repo: str, title: str, brief: str, mode: str = "queue", hours: float = 12.0) -> str:
+def new_mission(repo: str, title: str, brief: str, mode: str = "queue", hours: float = 12.0, extra: dict | None = None) -> str:
     """Write missions/<NNN-slug>/brief.md with the front matter the daemon reads. Returns the mission id."""
     root = os.path.join(repo, "missions")
     os.makedirs(root, exist_ok=True)
@@ -121,7 +121,8 @@ def new_mission(repo: str, title: str, brief: str, mode: str = "queue", hours: f
     body = brief.strip()
     if not body.startswith("#"):
         body = f"# {title}\n\n{body}"
-    front = f"---\nmode: {'preempt' if mode == 'preempt' else 'queue'}\nhours: {float(hours):g}\ntitle: {_line(title, MAX_TITLE)}\n---\n"
+    more = "".join(f"{k}: {_line(str(v), 40)}\n" for k, v in (extra or {}).items() if re.fullmatch(r"[a-z_]{2,20}", k))
+    front = f"---\nmode: {'preempt' if mode == 'preempt' else 'queue'}\nhours: {float(hours):g}\ntitle: {_line(title, MAX_TITLE)}\n{more}---\n"
     write(os.path.join(root, mid, "brief.md"), front + body + "\n")
     return mid
 

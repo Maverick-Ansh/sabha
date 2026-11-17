@@ -28,15 +28,20 @@ so download your research results from the Research tab before that.
 
 Optional, as Kaggle Secrets (Add-ons > Secrets, then tick each one for this notebook) or in the app later: `TAVILY_API_KEY` (much better web search,
 free tier at tavily.com), `HF_TOKEN`, `SABHA_GIT_REPO` + `SABHA_GIT_TOKEN` (push research results to your own GitHub repo).
+
+**Alerts on your phone** (set once, every new box texts you its link): a secret `NTFY_TOPIC` (install the free ntfy app and subscribe
+to the same long, odd topic name), or `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (you can then text the box: `/research <question> for 4h`,
+`/status`, `/report`). WhatsApp, email and a phone call are in the app: Crew, Alerts.
 """,
     "colab": """
 # Sabha on Colab
 
 Your own agent council on a Colab GPU. Runtime > Change runtime type > **T4 GPU**, then run the cell below. In about 2 minutes it
-prints **one link**. Colab has one GPU, so Sabha runs one model (Qwen3.5-4B) for everything. On Kaggle (2x T4) it runs two.
+prints **one link**. On a T4 Sabha runs one model (Qwen3.5 9B, 4-bit) for everything; on an A100 it runs Qwen3.5 27B. On Kaggle (2x T4) it runs two.
 
 Keep the link private. Keep this cell running. Optional secrets (key icon on the left): `TAVILY_API_KEY`, `HF_TOKEN`,
-`SABHA_GIT_REPO`, `SABHA_GIT_TOKEN`.
+`SABHA_GIT_REPO`, `SABHA_GIT_TOKEN`, and for alerts on your phone `NTFY_TOPIC` or `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`.
+On a bigger GPU (L4, A100, H100) the box picks a bigger model by itself; Crew, Models switches to any other.
 """,
 }
 
@@ -46,6 +51,7 @@ import importlib, os, subprocess, sys
 
 # os.environ["TAVILY_API_KEY"] = "tvly-..."   # optional: better web search (or a Kaggle / Colab secret)
 # os.environ["SABHA_NEW_LINK"] = "1"          # optional: a fresh link (the models keep running)
+# os.environ["NTFY_TOPIC"] = "sabha-..."        # optional: phone alerts through the ntfy app (or a Kaggle / Colab secret)
 
 BASE = next((d for d in ("/kaggle/working", "/content") if os.path.isdir(d)), os.path.expanduser("~"))
 APP = os.path.join(BASE, "sabha")

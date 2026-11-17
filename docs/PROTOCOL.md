@@ -417,24 +417,30 @@ counts with `fallback: true` and the reason in `error`.
 ## 9. Box, settings, taste and research runs started from the app
 
 The notebook cell runs `sabha/box.py up`. It starts the hub (`--data <base>/sabha_data`) and a detached
-supervisor, which writes `<data>/boot.json` every few seconds while it installs the tools and starts one
-vLLM server per GPU (deep = Qwen3.5-9B AWQ on GPU 0, port 8001; reader = Qwen3.5-4B on the next GPU, port 8002;
-one GPU = reader only). It registers each model (`served_name` = `deep` / `reader`, `extra_body` turns thinking
-off) and, once, a default crew of four agents.
+supervisor, which writes `<data>/boot.json` every few seconds while it installs the tools and starts the vLLM
+servers of `<data>/run/layout.json` (section 11; on first boot the catalog's default for the GPUs: on 2x T4,
+deep = Qwen3.5-9B AWQ on GPU 0, port 8001, and reader = Qwen3.5-4B on GPU 1, port 8002). It registers each model
+(`served_name` = `deep` / `reader`, `extra_body` turns thinking off for Qwen) and, once, a default crew of four agents.
 
 | Method | Path | Body | Answer |
 |---|---|---|---|
 | GET | `/api/boot` | | `{present, ready, stage, note, alive, age_s, gpus, steps:[{id, short, label, status, detail, secs, expect_s}]}`. `present:false` = the hub was not started by the launcher. Step status: `waiting`, `running`, `downloading`, `starting`, `ready`, `done`, `failed`. |
 | GET | `/api/settings` | | `{git_repo, tavily_key:{set, hint, source}, hf_token:{…}, git_token:{…}, search, git_sync}`. A key never comes back, only `set` and its last 4 characters. |
 | PUT | `/api/settings` | any of `tavily_key`, `hf_token`, `git_repo` (`owner/name`), `git_token`; `""` clears | same as GET. Stored in `<data>/settings.json` (mode 600); the Tavily key goes into the hub's environment at once (web tools, dsh runs and the research daemon inherit it). |
-| GET | `/api/taste` | | `{taste, loves:[…], topic, hours, updated}` |
-| PUT | `/api/taste` | any of `taste` (≤ 6000 chars), `loves` (list or text; arXiv ids are pulled out of links, other lines kept as titles), `topic`, `hours` (0.5 to 12) | same as GET |
+| GET | `/api/taste` | | `{taste, loves:[…], topic, hours, mode, wave_min, updated}` |
+| PUT | `/api/taste` | any of `taste` (≤ 6000 chars), `loves` (list or text; arXiv ids are pulled out of links, other lines kept as titles), `topic`, `hours` (0.5 to 12, or 0 = until the session ends), `mode` (`instant` \| `continuous`), `wave_min` (0 = automatic) | same as GET |
 | POST | `/api/research/start` | optional taste fields (saved first) | the run status (below) plus `title`, `note`. 400 when the question is shorter than 12 characters, 409 when a run is going or no model served as `deep`/`reader` is ready. |
 | POST | `/api/research/stop` | `{mode: "finish" \| "now"}` | the run status. `finish` sends the daemon a `finish` command: final reports and synthesis from what is in hand, then it ends. `now` stops it at once. |
 | GET | `/api/research/export/{mission}` | | a zip of the mission folder (brief, taste, plan, cards, track reports, ledgers, synthesis). Accepts `?token=` because a download link sends no header. |
 
-Run status, also under `run` in `GET /api/research`: `{running, mission, started, until, hours, mock, finishing,
-ended, how, git_sync, log}`.
+Run status, also under `run` in `GET /api/research`: `{running, mission, started, until, hours, mock, mode,
+wave_min, finishing, ended, how, git_sync, log}`. `mode` is `instant`, `continuous` or `one pass` (a continuous run
+too short for waves).
+
+Run shape: **instant** = 0.34 h, 2-3 tracks, no waves. **continuous** = the hours asked for (0 = until 15 min before
+the session ends, capped by what is left), cut into waves of `wave_min` minutes, automatic = 20 (≤ 1.5 h), 30
+(≤ 3 h), 45 (≤ 6 h) or 60. The brief's front matter carries `run`, `tracks`, `wave_minutes`; the daemon gets
+`--wave-min`. Section 12 has what happens at each wave.
 
 Start writes `missions/<NNN-slug>/{brief.md, taste.md, loves.json}` under the research home (`<data>/research`, or
 `--research-repo`) and starts, detached, `python -m sabha.research.run --mission <id> --once` (in demo mode
@@ -466,3 +472,86 @@ adds the matching snippets. The request carries four read-only tools: `search_me
 A reply that only announces a lookup is nudged once to make it. A server that refuses `tools` gets plain chat.
 Each lookup is streamed as `chat.delta {message_id, step:{tool, label, result, id?, url?}}` and kept on the final
 message as `steps: [...]`.
+
+## 11. Models catalog: which model serves which role (`sabha/catalog.py`)
+
+`<data>/run/layout.json` = `{servers:[{role, hf, name, label, family, gpus:[…], tp, port, util, ctx, seqs, dtype,
+tool_parser, reasoning_parser, mm, no_think, weights_gib, fits, why}], by, ts}`. The supervisor re-reads it every few
+seconds; a server whose fields changed is stopped (`serve.sh stop`), its weights are fetched, and it starts again
+with `CUDA_VISIBLE_DEVICES=<gpus>`, `--tensor-parallel-size <tp>`, `--dtype <dtype>` (float16 on a T4, auto on
+newer GPUs; Triton attention only on fp16). Two servers on one GPU start one after the other. A role that is not
+served (one model for every role) gets its hub entry pointed at the deep server, so agents seated on it keep
+working; research then runs with `SABHA_READER=deep`. Each role's context window reaches the daemon as
+`SABHA_CTX_<ROLE>`.
+
+Fit per server: weights / tp + the KV cache of one full-length request (KV per token from config.json: full-attention
+layers x KV heads x head dim x 2 x 2 bytes, MLA from `kv_lora_rank`) + overhead (1.5 GB + 1.5 % of the weights,
++0.4 GB with tensor parallel) ≤ GPU memory x util (0.90 on GPUs under 30 GB, else 0.92) x share. `yes` leaves room
+for three full requests, `tight` for one (the context may be halved down to 8k to fit), `no` does not fit or the GPU's
+compute capability is too low (FP8 / MXFP4 / GPTQ-Marlin need 8.0, NVFP4 needs 10.0).
+
+| Method | Path | Body | Answer |
+|---|---|---|---|
+| GET | `/api/catalog` | | `{gpus:[{index, name, mem_mb, sm}], layout, presets:[{id, title, why, fits, servers}], models:[{hf, label, family, weights_gib, kv_kib, min_sm, max_ctx, note, curated, solo:{fits, tp, gpus, util, ctx, free_gib, why}, seats:{deep?, reader?}}], demo}`. Layout servers carry `status`/`detail` from the boot strip. Demo mode reports two demo T4s. |
+| GET | `/api/catalog/search?q=` | | `{models:[…]}` the same shape. Text = Hugging Face search (text-generation and image-text-to-text, by downloads; GGUF, MLX, EXL, NVFP4, ONNX and bnb repos left out). `owner/name` = one lookup with the real size and config. |
+| POST | `/api/catalog/use` | `{preset}` or `{hf, as: "solo" \| "deep" \| "reader"}` | `{layout, note, why}`. 409 when it does not fit (the answer says why), or when the seat does not exist. |
+
+## 12. Continuous research: waves (`sabha/research/waves.py`)
+
+`state/waves.json` = `{n, wave_s, started, ends, closed, history:[{n, started, ended, cards, headline, memory}],
+plan_changes}`. A wave turns over when its time is up or when every active track is saturated with nothing queued
+(after 8 minutes), never when less than 0.4 of a wave is left before the final reports. The turnover, in the deep
+model's one maintenance thread while the readers keep reading: fold the wave's last cards into the ledgers; write
+`waves/wNN.md` (HEADLINE line + What we found, What changed in what we believe, Dead ends, What the next wave should
+do); rewrite `knowledge.md` (Answer so far, Established, Contested, Open questions, Dead ends, Next directions;
+≤ 7000 chars); tend long-term memory (≤ 5 ops); re-plan `plan.json` (`keep` / `refocus` / `retire` per track, up to
+2 `new` tracks, at most 6 active; new questions carry `wave`, retired tracks keep their cards and get `retired: n`);
+refresh `state/longmem.txt`; reset saturation; rebuild `REPORT.md`; log `wave` and `replanned` events and a line in
+`state/notify.jsonl`. At the end the last wave is closed the same way (no re-plan), the synthesis gets the knowledge
+and every headline first, and `REPORT.md` puts the answer on top.
+
+Every agent prompt (the memory packet) now carries, after the track and the taste: the answer so far, the open
+questions and the dead ends from `knowledge.md` (≤ 1400 chars) and the long-term memories picked for the mission
+(`state/longmem.txt`, ≤ 1300 chars). Both change only at a turnover, so the prompt prefix stays stable for the
+server's prefix cache within a wave.
+
+`GET /api/research` mission fields added: `has_report`, `has_knowledge`, `waves` (the object above, `{on:false}` for
+a run without waves); agent rows add `retired`, `since_wave`. Docs: `kind=living` (REPORT.md), `kind=knowledge`.
+
+## 13. Long-term memory (`sabha/research/longmem.py`)
+
+`<data>/memory/` (env `SABHA_LONGMEM` overrides): `MEMORY.md` (index: `- [name](file) (type) description`) and one
+`<slug>.md` per memory with front matter `name, description, type, created, updated, source, uses`. Types: `owner`,
+`lesson`, `fact`, `source`. The owner's taste becomes the `owner-research-taste` memory at every run start. The
+gardener never deletes an `owner` memory; above 160 memories the least used, oldest non-owner ones go. Retrieval is
+BM25 with name and description weighted 3x. Talk's memory search indexes them as `longmem:<name>` and living reports
+as `living:<mission>`. The export zip carries them under `longterm-memory/`.
+
+| Method | Path | Body | Answer |
+|---|---|---|---|
+| GET | `/api/longmem?q=` | | `{home, types, memories:[{name, type, description, updated, source, uses, score?}]}` (all, or the 30 best for q) |
+| GET | `/api/longmem/{name}` | | the memory with `body`; 404 when missing |
+| PUT | `/api/longmem/{name}` | `{type, description, body}` | the memory (the owner writes one) |
+| DELETE | `/api/longmem/{name}` | | `{ok:true}`; 404 when missing |
+
+## 14. Alerts (`sabha/notify.py`)
+
+`<data>/notify.json` (mode 600): `{ntfy:{topic, server, level}, telegram:{bot_token, chat_id, level}, whatsapp:{phone,
+apikey, level}, email:{host, port, user, password, to, level}, call:{provider, twilio_sid, twilio_token, twilio_from,
+to, telegram_user, level}}`. Levels: `all`, `important` (link, run_done, problem, session_ending), `off`. Calls ring
+only for run_done and problem. Kaggle / Colab secrets fill empty fields at boot (names in the README).
+
+Events: `link` (from `__main__` as soon as the tunnel is up), `box_ready` (boot.json turns ready), `run_started`,
+`wave` and `run_done` (from `state/notify.jsonl`, scanned every 15 s from a saved offset so a hub restart never
+re-sends), `problem` (a run that ended without finishing), `session_ending` (30 minutes left).
+
+Telegram is two-way: the hub long-polls `getUpdates` and answers only the saved `chat_id`. Commands: `/status`,
+`/report`, `/research <question> [for N h | until end | instant]`, `/tell <instruction>` (an `instruct` for every
+agent), `/finish`, `/stop`, `/link`, `/help`. The same parser (`Notifier.command`) serves any later two-way channel.
+
+| Method | Path | Body | Answer |
+|---|---|---|---|
+| GET | `/api/notify` | | per channel `{ready, level, <field>: value or {set, hint} for secrets}`, plus `recent:[{channel, kind, title, ok, info, t, ms}]` |
+| PUT | `/api/notify` | `{<channel>: {<field>: value, level}}`; `""` clears a field | same as GET. 400 for a bad level or an ntfy topic that is not 6-64 of `[A-Za-z0-9_-]`. |
+| POST | `/api/notify/test` | `{channel?}` | `{results:[…]}`; 409 when the named channel is not set up |
+| POST | `/api/notify/telegram/find` | | `{id, name}` of the newest chat that messaged the bot (saved as chat_id); 404 when none yet |

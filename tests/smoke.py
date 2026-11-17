@@ -28,7 +28,7 @@ os.environ["SABHA_MOCK_SPEED"] = "25"
 import aiohttp  # noqa: E402
 from aiohttp import web  # noqa: E402
 
-from sabha.server import Config, Hub, create_app  # noqa: E402
+from sabha.server import HUB_KEY, Config, Hub, create_app  # noqa: E402
 from sabha.store import DataDirBusy  # noqa: E402
 
 TOKEN = "smoke-token-123"
@@ -790,6 +790,110 @@ async def main() -> int:
         check("research: a second run starts after the first ended", st == 200 and r["running"], str(r)[:200])
         st, r = await api.call("POST", "/api/research/stop", {"mode": "now"})
         check("research: stop now", st == 200 and not r["running"] and r["how"] == "stopped from the app", str(r)[:200])
+        # ---------------- continuous research: waves, the living report, compaction, long-term memory, notify outbox
+        st, r = await api.call("POST", "/api/research/start", {"topic": "Which world models help a policy plan, over hours?",
+                                                              "mode": "continuous", "hours": 2, "wave_min": 0})
+        check("continuous: start in waves", st == 200 and r["running"] and r["mode"] == "continuous" and r["wave_min"] == 30, str(r)[:300])
+        cmid = r.get("mission", "") if isinstance(r, dict) else ""
+        croot = data_dir / "research" / "missions" / cmid
+        check("continuous: the brief carries the run shape", "wave_minutes: 30" in (croot / "brief.md").read_text("utf-8"))
+        ov = {}
+        for _ in range(80):
+            st, ov = await api.call("GET", "/api/research")
+            w = ((ov.get("mission") or {}).get("waves") or {}) if st == 200 else {}
+            if len(w.get("history") or []) >= 1:
+                break
+            await asyncio.sleep(0.5)
+        w = (ov.get("mission") or {}).get("waves") or {}
+        check("continuous: wave 1 closed, wave 2 running", w.get("on") and w.get("n") == 2 and w["history"][0]["n"] == 1
+              and w["history"][0]["headline"].startswith("Demo wave 1"), str(w)[:300])
+        check("continuous: the re-plan opened a track", len(ov.get("agents") or []) == 3
+              and any(a["id"] == "t3" and a["since_wave"] == 2 for a in ov["agents"]), str([a.get("id") for a in ov.get("agents") or []]))
+        check("continuous: living report and state of knowledge written", ov["mission"]["has_report"] and ov["mission"]["has_knowledge"]
+              and "## Wave log" in (croot / "REPORT.md").read_text("utf-8"))
+        st, doc = await api.call("GET", "/api/research/doc?kind=living")
+        check("continuous: the report is served", st == 200 and "Wave 1" in doc["md"] and "Where we stand" in doc["md"], str(doc)[:200])
+        st, doc = await api.call("GET", "/api/research/doc?kind=knowledge")
+        check("continuous: knowledge is served", st == 200 and "## Open questions" in doc["md"])
+        feed_kinds = {e.get("kind") for e in ov.get("feed") or []}
+        check("continuous: the feed tells the wave", "wave" in feed_kinds, str(feed_kinds))
+        for _ in range(100):
+            st, r = await api.call("GET", "/api/research")
+            if not r["run"]["running"]:
+                break
+            await asyncio.sleep(0.5)
+        check("continuous: the run ends on its own", not r["run"]["running"] and "finished" in (r["run"]["how"] or ""), str(r["run"])[:200])
+        rep = (croot / "REPORT.md").read_text("utf-8")
+        check("continuous: the final report has the answer on top and every wave", rep.index("## The answer") < rep.index("## Wave log")
+              and "Wave 2" in rep, rep[:300])
+        outbox = [json.loads(x) for x in (croot / "state" / "notify.jsonl").read_text("utf-8").splitlines()]
+        check("continuous: the notify outbox has the waves and the end", [x["kind"] for x in outbox][-1] == "done"
+              and sum(1 for x in outbox if x["kind"] == "wave") >= 2, str(outbox)[:300])
+        st, lm = await api.call("GET", "/api/longmem")
+        names = {m["name"]: m for m in (lm.get("memories") or [])} if st == 200 else {}
+        check("memory: the owner's taste and a lesson are kept", "owner-research-taste" in names and "demo-search-lesson" in names
+              and names["owner-research-taste"]["type"] == "owner", str(list(names))[:200])
+        st, one = await api.call("GET", "/api/longmem/demo-search-lesson")
+        check("memory: read one", st == 200 and "keyword" in one["body"] and one["type"] == "lesson", str(one)[:200])
+        st, lm = await api.call("GET", "/api/longmem?q=keyword%20searches")
+        check("memory: search ranks the lesson first", st == 200 and lm["memories"] and lm["memories"][0]["name"] == "demo-search-lesson")
+        st, _ = await api.call("PUT", "/api/longmem/owner-likes-code", {"type": "owner", "description": "The owner wants code links",
+                                                                       "body": "Only recommend papers with released code."})
+        st2, lm = await api.call("GET", "/api/longmem")
+        check("memory: the owner adds one from the app", st == 200 and any(m["name"] == "owner-likes-code" for m in lm["memories"]))
+        st, _ = await api.call("DELETE", "/api/longmem/owner-likes-code")
+        st2, _ = await api.call("GET", "/api/longmem/owner-likes-code")
+        check("memory: delete", st == 200 and st2 == 404)
+        lhome = data_dir / "memory"
+        check("memory: index file lists every memory", (lhome / "MEMORY.md").is_file()
+              and "demo-search-lesson" in (lhome / "MEMORY.md").read_text("utf-8"))
+        async with http.get(f"{base}/api/research/export/{cmid}?token={TOKEN}") as resp:
+            names2 = zipfile.ZipFile(io.BytesIO(await resp.read())).namelist() if resp.status == 200 else []
+        check("continuous: export has the report, the waves and long-term memory", f"{cmid}/REPORT.md" in names2
+              and any(n.startswith(f"{cmid}/waves/") for n in names2) and any("/longterm-memory/" in n for n in names2), str(names2[:10]))
+        st, r = await api.call("POST", "/api/research/start", {"topic": "A quick question about world model planning?", "mode": "instant"})
+        check("instant: one short pass", st == 200 and r["mode"] == "instant" and abs(r["hours"] - 0.34) < 0.01 and not r["wave_min"], str(r)[:200])
+        st, r = await api.call("POST", "/api/research/stop", {"mode": "now"})
+        # ---------------- notifications: secrets masked, validation, phone commands (no channel is ready: nothing leaves the box)
+        st, n = await api.call("GET", "/api/notify")
+        check("notify: every channel off at first", st == 200 and not any(n[c]["ready"] for c in ("ntfy", "telegram", "whatsapp", "email", "call")))
+        st, _ = await api.call("PUT", "/api/notify", {"ntfy": {"topic": "bad topic!"}})
+        check("notify: a bad ntfy topic -> 400", st == 400)
+        st, n = await api.call("PUT", "/api/notify", {"telegram": {"bot_token": "123456:ABCDEFsecretTOKENxyz", "level": "important"}})
+        check("notify: a secret comes back masked", st == 200 and n["telegram"]["bot_token"]["set"] and "secretTOKEN" not in json.dumps(n)
+              and n["telegram"]["level"] == "important" and not n["telegram"]["ready"], str(n.get("telegram"))[:200])
+        st, res = await api.call("POST", "/api/notify/test", {"channel": "ntfy"})
+        check("notify: test on a channel that is not set -> 409", st == 409)
+        st, res = await api.call("POST", "/api/notify/test", {})
+        check("notify: test with nothing ready sends nothing", st == 200 and res["results"] == [])
+        hub_obj = runner.app[HUB_KEY]
+        reply = await hub_obj.notifier.command("/status")
+        check("notify: /status answers from the box", "Last run" in reply or "No research" in reply, reply[:200])
+        reply = await hub_obj.notifier.command("/research Which planners use learned world models? instant")
+        check("notify: /research from the phone starts a run", reply.startswith("Research started") and "Instant" in reply, reply[:200])
+        reply = await hub_obj.notifier.command("/stop")
+        check("notify: /stop", reply == "Stopped.", reply)
+        reply = await hub_obj.notifier.command("hello there")
+        check("notify: plain text gets the help", "/research" in reply)
+        # ---------------- models catalog: fit per GPU, presets, the layout the supervisor applies
+        st, cat = await api.call("GET", "/api/catalog")
+        pre = {p["id"]: p for p in cat.get("presets") or []} if st == 200 else {}
+        check("catalog: demo GPUs and the 2x T4 presets", st == 200 and len(cat["gpus"]) == 2 and "balanced-default" in pre
+              and "one-strong-model" in pre, str(list(pre))[:200])
+        by = {m["hf"]: m for m in cat.get("models") or []}
+        check("catalog: a 70B does not fit a T4, the 9B does", by["casperhansen/llama-3.3-70b-instruct-awq"]["solo"]["fits"] == "no"
+              and by["cyankiwi/Qwen3.5-9B-AWQ-4bit"]["solo"]["fits"] == "yes")
+        st, r = await api.call("POST", "/api/catalog/use", {"preset": "balanced-default"})
+        lay = json.loads((data_dir / "run" / "layout.json").read_text("utf-8")) if st == 200 else {}
+        check("catalog: a preset writes the layout", st == 200 and [s["role"] for s in lay["servers"]] == ["deep", "reader"], str(r)[:200])
+        st, r = await api.call("POST", "/api/catalog/use", {"hf": "cyankiwi/Qwen3.5-27B-AWQ-4bit", "as": "solo"})
+        lay = json.loads((data_dir / "run" / "layout.json").read_text("utf-8"))
+        check("catalog: one big model over both GPUs", st == 200 and len(lay["servers"]) == 1 and lay["servers"][0]["tp"] == 2
+              and lay["servers"][0]["gpus"] == [0, 1], str(lay)[:300])
+        st, r = await api.call("POST", "/api/catalog/use", {"hf": "casperhansen/llama-3.3-70b-instruct-awq", "as": "solo"})
+        check("catalog: a model that does not fit -> 409", st == 409, str(r)[:200])
+        st, r = await api.call("POST", "/api/catalog/use", {"hf": "cyankiwi/Qwen3.5-9B-AWQ-4bit", "as": "reader"})
+        check("catalog: no reader seat in a one-model layout -> 409", st == 409, str(r)[:200])
 
         await runner.cleanup()
         runner = None

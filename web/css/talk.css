@@ -7,7 +7,7 @@
 .rail-head .micro { flex: 1; }
 .rail-list { flex: 1; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 2px; }
 .rail-item { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer; color: var(--ink); }
-.rail-item:hover { background: rgba(255,255,255,.55); }
+.rail-item:hover { background: rgba(var(--glass-rgb), .55); }
 .rail-item.on { background: var(--card-strong); box-shadow: var(--shadow-sm); }
 .rail-text { flex: 1; min-width: 0; }
 .rail-title { font-size: 13px; font-weight: 500; }
@@ -32,7 +32,7 @@
 .greet-2 { background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; padding-right: .08em; }
 .greeting p { font-size: 16px; margin: 0 0 22px; max-width: 520px; }
 .suggest { display: flex; flex-wrap: wrap; gap: 8px; }
-.suggest .chip { height: 32px; padding: 0 14px; font-size: 13px; cursor: pointer; background: rgba(255,255,255,.6); }
+.suggest .chip { height: 32px; padding: 0 14px; font-size: 13px; cursor: pointer; background: rgba(var(--glass-rgb), .6); }
 .suggest .chip:hover { color: var(--ink); border-color: rgba(var(--ink-rgb), .2); }
 
 .msg { animation: rise var(--t-slow) var(--ease) both; }

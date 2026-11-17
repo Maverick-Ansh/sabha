@@ -17,6 +17,9 @@ import { openPalette } from './palette.js';
 import { initNotify, setOpenMission } from './notify.js';
 import { nav } from './nav.js';
 import { lotusGlyph } from './lotus.js';
+import { initTheme } from './theme.js';
+
+initTheme();
 
 // The mist behind the app leans a little away from the pointer (theme.css reads --mx / --my).
 {

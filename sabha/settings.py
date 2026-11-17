@@ -24,6 +24,7 @@ ENV_OF = {"tavily_key": "TAVILY_API_KEY", "hf_token": "HF_TOKEN"}
 GIT_REPO = re.compile(r"^(?:https://github\.com/)?([A-Za-z0-9][A-Za-z0-9._\-]*)/([A-Za-z0-9._\-]+?)(?:\.git)?/?$")
 ARXIV_ID = re.compile(r"(?<![\d.])(\d{4}\.\d{4,5})(?:v\d+)?(?![\d])")
 TASTE_MAX, TOPIC_MAX, LOVES_MAX = 6000, 3000, 30
+RUN_MODES = ("instant", "continuous")  # instant: one short pass (~20 min); continuous: hours of work in waves
 
 
 def _read(path: Path) -> dict:
@@ -131,9 +132,14 @@ class Taste:
             hours = float(d.get("hours") or 6)
         except (TypeError, ValueError):
             hours = 6.0
+        mode = d.get("mode") if d.get("mode") in RUN_MODES else "continuous"
+        try:
+            wave = float(d.get("wave_min") or 0)
+        except (TypeError, ValueError):
+            wave = 0.0
         return {"taste": str(d.get("taste") or ""), "loves": [str(x) for x in d.get("loves") or [] if isinstance(x, str)],
-                "topic": str(d.get("topic") or ""), "hours": min(max(hours, 0.5), 12.0),
-                "updated": float(d.get("updated") or 0)}
+                "topic": str(d.get("topic") or ""), "hours": 0.0 if hours <= 0 else min(max(hours, 0.5), 12.0),
+                "mode": mode, "wave_min": min(max(wave, 0.0), 180.0), "updated": float(d.get("updated") or 0)}
 
     def save(self, body: dict) -> dict:
         cur = self.load()
@@ -144,11 +150,21 @@ class Taste:
                 cur[key] = body[key].strip()[:limit]
         if "loves" in body:
             cur["loves"] = clean_loves(body["loves"])
-        if "hours" in body:
+        if "hours" in body:  # 0 = until the session ends
             try:
-                cur["hours"] = min(max(float(body["hours"]), 0.5), 12.0)
+                h = float(body["hours"])
             except (TypeError, ValueError):
                 raise ApiError(400, "hours must be a number") from None
+            cur["hours"] = 0.0 if h <= 0 else min(max(h, 0.5), 12.0)
+        if "mode" in body:
+            if body["mode"] not in RUN_MODES:
+                raise ApiError(400, "mode must be instant or continuous")
+            cur["mode"] = body["mode"]
+        if "wave_min" in body:  # 0 = automatic
+            try:
+                cur["wave_min"] = min(max(float(body["wave_min"] or 0), 0.0), 180.0)
+            except (TypeError, ValueError):
+                raise ApiError(400, "wave_min must be a number of minutes") from None
         cur["updated"] = time.time()
         _write(self.path, cur)
         return cur

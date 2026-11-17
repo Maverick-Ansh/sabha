@@ -6,6 +6,7 @@ Models: s1 triage, reader gate + section map, deep reduce / gaps / planner / wri
 from __future__ import annotations
 
 import json
+import os
 import math
 import re
 import time
@@ -108,12 +109,24 @@ def plan_mission(m: Mission) -> dict:
             write(m.p("tracks", f"t{i}", "assignment.md"), f"# {title}\n\n{body}\n")
             tracks.append({"id": f"t{i}", **t, "weight": 1.5 if "most important" in body.lower() else 1.0})
     else:
+        try:
+            most = max(1, min(int(float(front.get("tracks") or 6)), 6))  # an instant run asks for 2-3 tracks
+        except ValueError:
+            most = 6
+        least = min(3, most) if most > 3 else max(most - 1, 1)
+        try:  # long-term memory picked for this brief by the daemon (research/waves.py refresh_memory_block)
+            mem = open(m.p("state", "longmem.txt"), encoding="utf-8").read().strip()
+        except OSError:
+            mem = ""
         props = llm.chat_json("deep", _sys("You split a research brief into parallel literature tracks. Answer in JSON."),
-                              "BRIEF:\n" + brief[:12000] + "\n\nSplit it into 3 to 6 non-overlapping tracks that together cover it. "
+                              "BRIEF:\n" + brief[:12000] +
+                              ("\n\nLONG-TERM MEMORY FROM EARLIER RUNS (use the lessons and sources; facts must be re-checked):\n" + mem
+                               if mem else "") +
+                              f"\n\nSplit it into {least} to {most} non-overlapping tracks that together cover it. "
                               "For each: name, one_line, questions (6-12), seeds (named papers or methods to read first), "
                               "starter_queries (8 arXiv queries, 2-4 keywords each), deliverable.",
                               OBJ(tracks=ARR(TRACK_SCHEMA)), max_tokens=4000)
-        for i, t in enumerate(props.get("tracks", [])[:6], 1):
+        for i, t in enumerate(props.get("tracks", [])[:most], 1):
             write(m.p("tracks", f"t{i}", "assignment.md"), f"# {t['name']}\n\n{t['one_line']}\n")
             tracks.append({"id": f"t{i}", **t, "weight": 1.0})
     for t in tracks:
@@ -857,13 +870,25 @@ def write_report(m: Mission, tid: str) -> str:
     return out
 
 
+def _near_card(m: Mission, bad: str) -> str | None:
+    """The one card a mistyped id most likely meant: same month, same length, at most 2 digits off (a 9B model copying
+    [2505.19017] as [2505.19107] was seen on a real run). None when no card or more than one is that close."""
+    try:
+        ids = [f[:-5] for f in os.listdir(m.p("cards")) if f.endswith(".json")]
+    except OSError:
+        return None
+    month = bad.split(".")[0]
+    near = [c for c in ids if c.startswith(month + ".") and len(c) == len(bad) and sum(a != b for a, b in zip(c, bad)) <= 2]
+    return near[0] if len(near) == 1 else None
+
+
 def _strip_unknown_cites(m: Mission, txt: str) -> str:
     keep = []
     for para in txt.split("\n"):
         ids = re.findall(r"\[(\d{4}\.\d{4,5})(?:v\d+)?\]", para)
-        if ids and not all(m.card(i) for i in ids):
-            bad = [i for i in ids if not m.card(i)]
-            para = re.sub(r"\[(" + "|".join(map(re.escape, bad)) + r")(?:v\d+)?\]", "[unverified citation removed]", para)
+        for i in [i for i in ids if not m.card(i)]:
+            fix = _near_card(m, i)
+            para = re.sub(r"\[" + re.escape(i) + r"(?:v\d+)?\]", f"[{fix}]" if fix else "[unverified citation removed]", para)
         keep.append(para)
     return "\n".join(keep)
 
@@ -890,6 +915,10 @@ def write_synthesis(m: Mission, final: bool = False) -> str:
         contested += [f"{c['id']}: {c['text'][:200]} (for {c.get('for')}, against {c.get('against')})"
                       for c in m.claims(t["id"]).values() if c.get("status") == "contested"]
     base = "\n\n".join(ctx)[:30000] + ("\n\nCONTESTED CLAIMS:\n" + "\n".join(contested[:20]) if contested else "")
+    from .waves import context_for_synthesis  # a continuous run: the compact knowledge and every wave's headline first
+    waves_ctx = context_for_synthesis(m)
+    if waves_ctx:
+        base = waves_ctx + "\n\n" + base[:24000]
     qs = plan.get("synthesis_questions", [])
     must = plan.get("synthesis_must_present", [])
     groups = [qs[i:i + 3] for i in range(0, len(qs), 3)] + ([must[:4], must[4:]] if must else [])

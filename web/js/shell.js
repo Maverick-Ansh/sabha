@@ -4,6 +4,7 @@ import { subscribe, getState, sessionWindow } from './store.js';
 import { fmtDur, serverNow } from './format.js';
 import { isMuted, setMuted } from './notify.js';
 import { lotusGlyph } from './lotus.js';
+import { currentTheme, toggleTheme } from './theme.js';
 
 export const MODES = ['research', 'watch', 'talk', 'work', 'council'];
 const LABEL = { research: 'Research', watch: 'Watch', talk: 'Talk', work: 'Work', council: 'Council' };
@@ -36,6 +37,15 @@ export function createTopbar({ onMode, onCrew, onPalette }) {
 
   const gpus = h('div.gpus');
   const muteBtn = h('button.btn.ghost.icon.mute-btn', { onclick: () => setMuted(!isMuted()) });
+  const themeBtn = h('button.btn.ghost.icon.theme-btn', { onclick: () => toggleTheme() });
+  const paintTheme = () => {
+    const d = currentTheme() === 'dark';
+    themeBtn.replaceChildren(icon(d ? 'sun' : 'moon', 17));
+    themeBtn.title = d ? 'Light mode' : 'Dark mode';
+    themeBtn.setAttribute('aria-label', themeBtn.title);
+  };
+  paintTheme();
+  addEventListener('sabha-theme', paintTheme);
   const dot = h('span.conn-dot', { role: 'status' });
   const demo = h('span.chip.mono.demo-chip', { hidden: true }, 'demo');
 
@@ -47,7 +57,7 @@ export function createTopbar({ onMode, onCrew, onPalette }) {
     h('div.tb-right', null,
       clock, gpus,
       h('button.btn.ghost.icon.palette-btn', { title: 'Command palette (Ctrl+K)', onclick: onPalette }, icon('search', 16)),
-      muteBtn,
+      themeBtn, muteBtn,
       h('button.btn.crew-btn', { onclick: onCrew }, icon('crew', 15), h('span', null, 'Crew')),
       dot));
 

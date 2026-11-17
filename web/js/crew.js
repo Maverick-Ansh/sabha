@@ -4,6 +4,8 @@ import { get, post, patch, del, enc } from './api.js';
 import { subscribe, getState, agents, upsert, remove } from './store.js';
 import { HUES, hueOf, truncate } from './format.js';
 import { toast } from './notify.js';
+import { renderBox } from './box.js';
+import { renderAlerts } from './alerts.js';
 
 const KINDS = ['chat', 'decision', 'embedding', 'custom', 'mock'];
 const HARNESS = [['dsh', 'dsh · tools + shell'], ['mock', 'mock · scripted demo'], ['chat', 'chat · no tools']];
@@ -11,7 +13,8 @@ let open = null;
 
 export function openCrew(tab = 'crew') {
   if (open) { open.show(tab); return; }
-  const tabs = ['crew', 'models'].map((t) => h('button', { 'aria-pressed': 'false', onclick: () => show(t) }, t === 'crew' ? 'Crew' : 'Models'));
+  const TABS = [['crew', 'Crew'], ['box', 'Models'], ['alerts', 'Alerts'], ['models', 'Endpoints']];
+  const tabs = TABS.map(([t, label]) => h('button', { 'aria-pressed': 'false', onclick: () => show(t) }, label));
   const body = h('div.so-body.scroll');
   const panel = h('aside.slideover', { role: 'dialog', 'aria-label': 'Crew and models' },
     h('header.so-head', null, h('div.display.italic.so-title', null, 'Crew & models'), h('div.seg.seg-sm', null, tabs),
@@ -25,10 +28,13 @@ export function openCrew(tab = 'crew') {
   addEventListener('keydown', onKey);
 
   function show(t) {
-    tabs.forEach((b, i) => b.setAttribute('aria-pressed', String(['crew', 'models'][i] === t)));
+    tabs.forEach((b, i) => b.setAttribute('aria-pressed', String(TABS[i][0] === t)));
     cleanup.forEach((f) => f()); cleanup = [];
     clear(body);
-    if (t === 'crew') renderCrew(body, cleanup); else renderModels(body, cleanup);
+    if (t === 'crew') renderCrew(body, cleanup);
+    else if (t === 'box') renderBox(body, cleanup);
+    else if (t === 'alerts') renderAlerts(body, cleanup);
+    else renderModels(body, cleanup);
   }
   function close() {
     cleanup.forEach((f) => f());

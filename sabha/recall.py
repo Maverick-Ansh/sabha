@@ -143,6 +143,15 @@ class Recall:
                      for m in t.get("messages") or [] if m.get("content")]
             add(f"chat:{t['id']}", "chat", f"Chat with {who}: {t.get('title')}", "\n\n".join(lines), t.get("updated_ts") or 0)
 
+        home = getattr(self.hub, "longmem_home", "")  # long-term memory the research agents keep (research/longmem.py)
+        if home:
+            from .research import longmem
+            for mem in longmem.load_all(home):
+                add(f"longmem:{mem['name']}", "memory", f"Long-term memory ({mem['type']}): {mem['name']}",
+                    f"{mem['description']}\n\n{mem['body']}", _mtime(os.path.join(home, mem["file"])))
+        for wpath in sorted(glob.glob(os.path.join(getattr(self.hub.cfg, "research_repo", "") or "", "missions", "*", "REPORT.md"))):
+            mid = os.path.basename(os.path.dirname(wpath))
+            add(f"living:{mid}", "report", f"Living report of research run {mid}", _read(wpath), _mtime(wpath))
         taste = self.hub.taste.load() if getattr(self.hub, "taste", None) else {}
         if taste.get("taste") or taste.get("loves") or taste.get("topic"):
             add("taste", "taste", "The owner's research taste",
@@ -178,6 +187,8 @@ class Recall:
                 sig += [_mtime(d) for d in glob.glob(os.path.join(root, "missions", pat))]
         taste = getattr(self.hub, "taste", None)
         sig.append(_mtime(str(taste.path)) if taste is not None else 0)
+        home = getattr(self.hub, "longmem_home", "")
+        sig.append(_mtime(os.path.join(home, "MEMORY.md")) if home else 0)
         return tuple(sig)
 
     def fresh(self) -> None:
