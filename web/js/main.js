@@ -96,11 +96,18 @@ function showGate() {
   gateEl = h('div.gate', null, h('div.gate-card.card', null,
     h('div.gate-lotus', { 'aria-hidden': 'true' }, lotusGlyph(54)),
     h('h1', null, 'The council is in session.'),
-    h('p', null, 'Paste your hub link or token to come in. The hub prints the link when it starts.'),
+    h('p', null, 'Paste the full link (it ends with #token=…) or just the key after token=. The notebook prints the link, and your alerts (Crew, Alerts) send it to your phone.'),
     h('form', { onsubmit: async (e) => {
       e.preventDefault();
-      if (!input.value.trim()) { input.focus(); return; }
-      setTokenFrom(input.value);
+      const v = input.value.trim();
+      if (!v) { input.focus(); return; }
+      if (/^https?:\/\//i.test(v) && !/token=/.test(v)) {
+        // the app hides the key from the address bar once it has read it, so a link copied from there has none
+        err.textContent = 'That link has no key at the end. Use the link the notebook printed (it ends with #token=…), or paste just the key.';
+        input.select();
+        return;
+      }
+      setTokenFrom(v);
       btn.disabled = true; err.textContent = '';
       try {
         const snap = await get('/api/state');
