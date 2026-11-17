@@ -203,7 +203,7 @@ export function createWatch() {
     stream.setScope(m ? { mission: fm } : { agent: f || null });
   }
 
-  subscribe('reset', () => { renderRoster(); renderStats(); renderFocus(); });
+  subscribe('reset', () => { renderRoster(); renderStats(); renderFocus(); if (active) pollResearch(); });  // the snapshot says whether research is on
   subscribe('agents', () => { renderRoster(); renderFocus(); });
   subscribe('missions', ({ mission }) => { renderStats(); if (mission) refreshRow(mission.agent_id); refreshAllRow(); });
   subscribe('activity', (ev) => { if (ev && ev.agent_id) refreshRow(ev.agent_id); else refreshAll(); });
