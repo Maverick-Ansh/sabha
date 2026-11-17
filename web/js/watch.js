@@ -110,7 +110,7 @@ export function createWatch() {
       for (const a of list) {
         const r = row('r:' + a.id, { hue: a.hue });
         setText(r.name, a.name.replace(/^Track \d+:\s*/, ''));
-        setText(r.role, `${a.counts.carded} cards`);
+        setText(r.role, `${a.counts.carded} card${a.counts.carded === 1 ? '' : 's'}`);
         setText(r.now, rNow(a)); r.now.title = rNow(a);
         r.btn.dataset.status = a.now && a.now.length ? 'running' : 'idle';
         rList.appendChild(r.btn);
