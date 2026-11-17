@@ -6,7 +6,9 @@ Every channel is optional and set in the app (Settings > Notifications) or from 
     ntfy      topic [+ server]. Free, no account: install the ntfy app and subscribe to the topic.
               The topic name is the password: anyone who knows it reads the messages, so make it long.
     telegram  bot token + chat id. Free. Two-way: the owner texts the box (/status, /research ..., /report).
-    whatsapp  phone + CallMeBot API key. Free for personal use (callmebot.com: message their number once).
+    whatsapp  provider callmebot: phone + CallMeBot API key (free for personal use; their bot is sometimes full),
+              or provider twilio: phone + Twilio SID / token + a WhatsApp sender (the free sandbox number works
+              after you message it "join <code>"; the SID and token can be left empty when Calls has them)
     email     SMTP host, port, user, password (for Gmail an app password), to.
     call      Twilio sid + token + from + to (a real phone call that reads the message out), or a free
               CallMeBot Telegram voice call to a Telegram @username.
@@ -47,7 +49,7 @@ log = logging.getLogger("sabha.notify")
 CHANNELS = {  # channel -> (fields, secret fields)
     "ntfy": (("topic", "server"), ("topic",)),
     "telegram": (("bot_token", "chat_id"), ("bot_token",)),
-    "whatsapp": (("phone", "apikey"), ("apikey",)),
+    "whatsapp": (("provider", "phone", "apikey", "twilio_sid", "twilio_token", "twilio_from"), ("apikey", "twilio_token")),
     "email": (("host", "port", "user", "password", "to"), ("password",)),
     "call": (("provider", "twilio_sid", "twilio_token", "twilio_from", "to", "telegram_user"), ("twilio_token",)),
 }
@@ -58,6 +60,7 @@ DEFAULT_LEVEL = {"ntfy": "all", "telegram": "all", "whatsapp": "important", "ema
 SECRET_ENV = {  # Kaggle / Colab secret name -> (channel, field); box.py imports these
     "NTFY_TOPIC": ("ntfy", "topic"), "TELEGRAM_BOT_TOKEN": ("telegram", "bot_token"), "TELEGRAM_CHAT_ID": ("telegram", "chat_id"),
     "WHATSAPP_PHONE": ("whatsapp", "phone"), "CALLMEBOT_KEY": ("whatsapp", "apikey"),
+    "WHATSAPP_PROVIDER": ("whatsapp", "provider"), "TWILIO_WHATSAPP_FROM": ("whatsapp", "twilio_from"),
     "SMTP_HOST": ("email", "host"), "SMTP_PORT": ("email", "port"), "SMTP_USER": ("email", "user"),
     "SMTP_PASSWORD": ("email", "password"), "NOTIFY_EMAIL": ("email", "to"),
     "TWILIO_SID": ("call", "twilio_sid"), "TWILIO_TOKEN": ("call", "twilio_token"), "TWILIO_FROM": ("call", "twilio_from"),
@@ -130,6 +133,9 @@ class Notifier:
         if name == "telegram":
             return bool(c.get("bot_token") and c.get("chat_id"))
         if name == "whatsapp":
+            if (c.get("provider") or "callmebot") == "twilio":
+                sid, tok = self._twilio(c)
+                return bool(c.get("phone") and c.get("twilio_from") and sid and tok)
             return bool(c.get("phone") and c.get("apikey"))
         if name == "email":
             return bool(c.get("host") and c.get("user") and c.get("password") and c.get("to"))
@@ -266,9 +272,26 @@ class Notifier:
             return self.tg_send(chat_id, re.sub(r"</?b>", "", msg).replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
         return code == 200, f"HTTP {code}" + ("" if code == 200 else f" {body[:120]}")
 
+    def _twilio(self, c: dict) -> tuple[str, str]:
+        """Twilio SID and token for WhatsApp: its own, else the ones the Calls channel has."""
+        call = self.ch("call")
+        return (c.get("twilio_sid") or call.get("twilio_sid") or ""), (c.get("twilio_token") or call.get("twilio_token") or "")
+
     def _send_whatsapp(self, kind, title, text, link):
         c = self.ch("whatsapp")
         msg = f"*{title}*" + (f"\n{_clip(text, 900)}" if text else "") + (f"\n{link}" if link else "")
+        if (c.get("provider") or "callmebot") == "twilio":
+            sid, tok = self._twilio(c)
+            wa = lambda n: n if n.startswith("whatsapp:") else "whatsapp:" + n  # noqa: E731
+            auth = base64.b64encode(f"{sid}:{tok}".encode()).decode()
+            data = urllib.parse.urlencode({"To": wa(c["phone"]), "From": wa(c["twilio_from"]), "Body": msg}).encode()
+            code, body = _http("POST", f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json", data,
+                               {"Authorization": f"Basic {auth}", "Content-Type": "application/x-www-form-urlencoded"})
+            ok = code in (200, 201)
+            hint = ""
+            if not ok and "63016" in body:
+                hint = " (outside the 24 h window: send the sandbox any message from WhatsApp, then test again)"
+            return ok, f"HTTP {code}" + ("" if ok else f" {body[:140]}{hint}")
         q = urllib.parse.urlencode({"phone": c["phone"], "text": msg, "apikey": c["apikey"]})
         code, body = _http("GET", f"https://api.callmebot.com/whatsapp.php?{q}")
         ok = code == 200 and "error" not in body.lower()[:300]

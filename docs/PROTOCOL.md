@@ -536,8 +536,8 @@ as `living:<mission>`. The export zip carries them under `longterm-memory/`.
 
 ## 14. Alerts (`sabha/notify.py`)
 
-`<data>/notify.json` (mode 600): `{ntfy:{topic, server, level}, telegram:{bot_token, chat_id, level}, whatsapp:{phone,
-apikey, level}, email:{host, port, user, password, to, level}, call:{provider, twilio_sid, twilio_token, twilio_from,
+`<data>/notify.json` (mode 600): `{ntfy:{topic, server, level}, telegram:{bot_token, chat_id, level}, whatsapp:{provider, phone,
+apikey, twilio_sid, twilio_token, twilio_from, level}, email:{host, port, user, password, to, level}, call:{provider, twilio_sid, twilio_token, twilio_from,
 to, telegram_user, level}}`. Levels: `all`, `important` (link, run_done, problem, session_ending), `off`. Calls ring
 only for run_done and problem. Kaggle / Colab secrets fill empty fields at boot (names in the README).
 

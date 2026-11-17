@@ -94,7 +94,7 @@ Crew, **Alerts** sets any of these (all optional, all free except a real phone c
 |---|---|---|
 | Phone push (ntfy) | install the ntfy app, subscribe to a long topic name, type the same name in Sabha | read |
 | Telegram | @BotFather, /newbot, paste the token, message your bot once, press Find my chat | read and reply: `/status`, `/report`, `/research <question> for 4h`, `/tell <instruction>`, `/finish`, `/stop` |
-| WhatsApp | CallMeBot: message their number once for a free key | read |
+| WhatsApp | CallMeBot (free; message the number on callmebot.com once for a key, their bot is sometimes full), or Twilio's WhatsApp sandbox (free trial; send it `join <code>`, say hi when you start a box) | read |
 | Email | SMTP (for Gmail an app password) | read |
 | Phone call | Twilio (paid), or a free Telegram voice call through CallMeBot | rings when a run finishes or breaks |
 
@@ -102,7 +102,7 @@ You hear about: the box being up (with the new link, so you never copy it from t
 run started, every wave (its headline), the run finished (the first sentence of the answer), problems, and 30
 minutes before the session ends. Calls ring only for "finished" and "problem". The same settings come from Kaggle /
 Colab secrets on every new box: `NTFY_TOPIC`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `WHATSAPP_PHONE`,
-`CALLMEBOT_KEY`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `NOTIFY_EMAIL`, `TWILIO_SID`, `TWILIO_TOKEN`,
+`CALLMEBOT_KEY`, `WHATSAPP_PROVIDER`, `TWILIO_WHATSAPP_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `NOTIFY_EMAIL`, `TWILIO_SID`, `TWILIO_TOKEN`,
 `TWILIO_FROM`, `CALL_TO`, `CALL_TELEGRAM_USER`.
 
 ## Bigger GPUs, more models

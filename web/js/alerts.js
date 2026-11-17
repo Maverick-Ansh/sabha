@@ -13,9 +13,15 @@ const CH = [
     how: 'In Telegram open @BotFather, send /newbot, copy the token here and save. Then send your new bot any message and press Find my chat. '
       + 'You can text it back: /status, /report, /research <question> for 4h, /tell <instruction>, /finish, /stop.',
     fields: [['bot_token', 'bot token from @BotFather', true], ['chat_id', 'chat id (Find my chat fills it)', false]] },
-  { id: 'whatsapp', title: 'WhatsApp', free: 'free for personal use (CallMeBot)',
-    how: 'Save +34 644 71 81 99 as a contact, send it "I allow callmebot to send me messages" on WhatsApp, and it answers with your API key. Phone with country code, e.g. +919876543210.',
-    fields: [['phone', 'your WhatsApp number, +country code', false], ['apikey', 'CallMeBot API key', true]] },
+  { id: 'whatsapp', title: 'WhatsApp', free: 'CallMeBot (free) or Twilio (free trial sandbox)',
+    how: 'Two ways. CallMeBot, free: open callmebot.com, WhatsApp API page, save the number shown there (it is hidden while their bot is full), '
+      + 'send it "I allow callmebot to send me messages" and it answers with your API key; provider callmebot + your number + that key. '
+      + 'Twilio, works any time: in the Twilio console open Messaging, Try WhatsApp, and send the sandbox number the "join <code>" it shows; '
+      + 'provider twilio + your number + the sandbox number as sender (+14155238886) + account SID and auth token (or leave them empty if Phone call has them). '
+      + 'Twilio only delivers within 24 h of your last WhatsApp message to it, so say hi to it when you start a box. Numbers with country code, e.g. +919876543210.',
+    fields: [['provider', 'callmebot or twilio', false], ['phone', 'your WhatsApp number, +country code', false], ['apikey', 'CallMeBot API key', true],
+      ['twilio_from', 'Twilio WhatsApp sender, e.g. +14155238886', false], ['twilio_sid', 'Twilio account SID (optional)', false],
+      ['twilio_token', 'Twilio auth token (optional)', true]] },
   { id: 'email', title: 'Email', free: 'your own mail account',
     how: 'For Gmail: turn on 2-step verification, create an app password (Google account, Security, App passwords) and use it here. Host smtp.gmail.com, port 465.',
     fields: [['host', 'SMTP host, e.g. smtp.gmail.com', false], ['port', 'port (465 or 587)', false], ['user', 'login, e.g. you@gmail.com', false],

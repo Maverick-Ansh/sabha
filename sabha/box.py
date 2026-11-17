@@ -71,6 +71,7 @@ NOTIFY = os.path.join(DATA, "notify.json")
 NOTIFY_SECRETS = {  # secret name -> (channel, field); the same table as SECRET_ENV in sabha/notify.py
     "NTFY_TOPIC": ("ntfy", "topic"), "TELEGRAM_BOT_TOKEN": ("telegram", "bot_token"), "TELEGRAM_CHAT_ID": ("telegram", "chat_id"),
     "WHATSAPP_PHONE": ("whatsapp", "phone"), "CALLMEBOT_KEY": ("whatsapp", "apikey"),
+    "WHATSAPP_PROVIDER": ("whatsapp", "provider"), "TWILIO_WHATSAPP_FROM": ("whatsapp", "twilio_from"),
     "SMTP_HOST": ("email", "host"), "SMTP_PORT": ("email", "port"), "SMTP_USER": ("email", "user"),
     "SMTP_PASSWORD": ("email", "password"), "NOTIFY_EMAIL": ("email", "to"),
     "TWILIO_SID": ("call", "twilio_sid"), "TWILIO_TOKEN": ("call", "twilio_token"), "TWILIO_FROM": ("call", "twilio_from"),
