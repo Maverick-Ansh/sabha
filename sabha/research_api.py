@@ -194,7 +194,9 @@ class Research:
             head = self._cached(os.path.join(mroot, "brief.md"), lambda p: _read_text(p, 600), "")
             tm = re.search(r"^title:\s*(.+)$", head, re.M) or re.search(r"^#\s+(.+)$", head, re.M)
             out.append({"id": name, "status": st.get("status") or "waiting", "error": st.get("error") or "",
-                        "started": _epoch(st.get("started")), "title": (tm.group(1).strip() if tm else name)[:120],
+                        "started": _epoch(st.get("started")),
+                        "title": (_read_text(os.path.join(mroot, "state", "report_title.txt"), 300).strip()  # the finished report's own title
+                                  or (tm.group(1).strip() if tm else name))[:120],
                         "one_line": plan.get("one_line", ""), "tracks": len(plan.get("tracks") or []),
                         "mode": "preempt" if "mode: preempt" in head[:400] else "queue"})
         return out

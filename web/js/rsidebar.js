@@ -87,7 +87,7 @@ export function createSidebar(opts = {}) {
       }
       for (const x of (hits && hits.q === q ? hits.hits : [])) {  // a title match that also matched inside: show where
         const node = list.querySelector(`.rs-item[data-lid="${CSS.escape(x.lid)}"]`);
-        if (node && x.snippet) node.appendChild(h('div.rs-snip', null, mark(x.snippet, words)));
+        if (node && x.snippet && !node.querySelector('.rs-snip')) node.appendChild(h('div.rs-snip', null, mark(x.snippet, words)));
       }
       if (!quick.length && !deepHits.length) list.appendChild(h('div.rs-none', null, hits && hits.q === q ? 'Nothing matches.' : 'Searching…'));
       return;
