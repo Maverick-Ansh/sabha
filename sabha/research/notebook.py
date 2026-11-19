@@ -357,9 +357,9 @@ def latest_notes(m: Mission, k: int = 4) -> list[dict]:
 
 
 def _ask(m: Mission, system: str, user: str, max_tokens: int = 1400) -> str:
-    from .agents import _strip_unknown_cites, _sys
+    from .agents import _prose, _strip_unknown_cites
     try:
-        txt = llm.chat("deep", _sys(system + ("\nTHE OWNER'S RESEARCH TASTE (write for this person):\n" + m.taste if m.taste else "")),
+        txt = llm.chat("deep", _prose(system + ("\nTHE OWNER'S RESEARCH TASTE (write for this person):\n" + m.taste if m.taste else "")),
                        user, max_tokens=max_tokens, temperature=0.35, timeout=480)
     except llm.LLMError as e:
         return f"_(this part could not be written: {str(e)[:100]})_"
@@ -380,6 +380,22 @@ def _confidence_line(txt: str) -> str:
     reason = " ".join(mm.group(2).split()).strip().rstrip(".")
     reason = re.sub(r"^because\s+", "", reason, flags=re.I)
     return txt[:mm.start()].rstrip() + f"\n\nConfidence: {level}" + (f", because {reason}." if reason else ".")
+
+
+def pick_title(txt: str) -> str:
+    """The title out of whatever the model wrote: 'Title: X', '### Title' then X, a JSON {"title": X}, or just X."""
+    v = _loads(txt or "")
+    if isinstance(v, dict):
+        for k, x in v.items():
+            if k.lower() in TITLE_KEYS and isinstance(x, str):
+                return " ".join(x.split()).strip(" .'\"")
+    for line in (txt or "").splitlines():
+        t = re.sub(r"^\s*(?:#+|[-*>]|\d+[.)])\s*", "", line)
+        t = re.sub(r"[*_`\"]", "", t).strip()
+        t = re.sub(r"^(?:report\s+)?title\s*:\s*", "", t, flags=re.I).strip(" .'")
+        if t and t.lower() not in ("title", "report title"):
+            return " ".join(t.split())[:120]
+    return ""
 
 
 def comparison_table(cards: list[dict], k: int = 14) -> str:
@@ -437,7 +453,7 @@ def refine(m: Mission, ask=None) -> str:
     title = ask(m, "You name finished research reports. Answer with the title only.",
                 f"THE QUESTION:\n{q[:1500]}\n\nTHE ANSWER:\n{short[:1500]}\n\nGive this report a title: 4 to 10 words, plain and "
                 "specific, like a good paper or essay title. No quotes, no markdown, no colon-separated subtitle unless it helps.", 40)
-    title = " ".join(re.sub(r"[#*_`\"]", "", (title or "").strip().splitlines()[0] if (title or "").strip() else "").split()).strip(" .'")
+    title = pick_title(title)
     if 8 <= len(title) <= 120 and not title.startswith("(") and "could not be written" not in title:
         write(m.p("state", "report_title.txt"), title + "\n")
     from .waves import knowledge_from_ledgers

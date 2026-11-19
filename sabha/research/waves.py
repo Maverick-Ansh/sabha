@@ -24,7 +24,7 @@ import re
 import time
 
 from . import live, llm, longmem, notebook as NB, trace
-from .agents import ARR, ENUM, OBJ, STR, _card_brief, _strip_unknown_cites, _sys, rank_cards, render_digest
+from .agents import ARR, ENUM, OBJ, STR, _card_brief, _prose, _strip_unknown_cites, _sys, rank_cards, render_digest
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
 MAX_ACTIVE_TRACKS = 6
@@ -175,7 +175,7 @@ def chapter(m: Mission, w: dict, ended: float) -> tuple[str, str, int]:
                 "from the cards; separate measured results from author hypotheses; if the wave found little, say so plainly. "
                 "Under 600 words.")
         try:
-            txt = llm.chat("deep", _sys("You write one chapter of a living research report: what the team found in the "
+            txt = llm.chat("deep", _prose("You write one chapter of a living research report: what the team found in the "
                                         "last wave of work. Markdown." + (("\nTHE OWNER'S RESEARCH TASTE (write for this person):\n"
                                                                             + m.taste) if m.taste else "")),
                            user, max_tokens=1400, temperature=0.4, timeout=420)
@@ -237,7 +237,7 @@ def compact(m: Mission, chapter_md: str, n: int) -> str:
             "Dead ends: searches and directions that gave nothing, so nobody repeats them. Keep what still holds from the old state, "
             "merge the new chapter in, drop what was retired or disproved. Under 900 words.")
     try:
-        txt = llm.chat("deep", _sys("You keep the team's state of knowledge: the short document every agent reads at the start "
+        txt = llm.chat("deep", _prose("You keep the team's state of knowledge: the short document every agent reads at the start "
                                     "of every step. You rewrite it after each wave of work. Markdown, under 900 words."),
                        user, max_tokens=1600, temperature=0.3, timeout=420)
         txt = _knowledge_headings(NB.unjson(txt, 2))

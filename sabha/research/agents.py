@@ -44,6 +44,21 @@ def _sys(task: str) -> str:
     return MEMORY_LESSON + "\n" + task.strip()
 
 
+WRITER_LESSON = """WRITER'S RULES (read this first, every time)
+You write for the owner of a research run: markdown prose, never JSON, no preamble.
+1. Cite papers as [arxiv_id], only papers given to you, and call a paper only by the title given with it.
+2. Numbers only from the papers' measured results. Say which claims are only the authors' hypotheses.
+3. Unknown stays unknown: never fill a gap from what you remember about a famous paper.
+4. Predicting future observations is not causal understanding: say "prediction only" unless the paper intervenes or tests counterfactuals.
+"""
+
+
+def _prose(task: str) -> str:
+    """The system prompt for writing (reports, chapters, synthesis). MEMORY_LESSON tells the agents that only their JSON
+    survives, and a small model then answers a markdown request with JSON (seen on a real run)."""
+    return WRITER_LESSON + "\n" + task.strip()
+
+
 # ---------------------------------------------------------------- mission planner
 
 
@@ -864,7 +879,7 @@ def write_report(m: Mission, tid: str) -> str:
         if not names:
             continue
         try:
-            txt = llm.chat("deep", _sys("You write part of a technical, evidence-based research report in markdown. "
+            txt = llm.chat("deep", _prose("You write part of a technical, evidence-based research report in markdown. "
                                         "Cite cards as [arxiv_id]. Use only the cards and digest given. No generic overview prose. "
                                         "Separate measured results from author hypotheses. Never call prediction causal understanding.\n"
                                         "RESEARCH STANDARDS:\n" + std +
@@ -937,7 +952,7 @@ def write_synthesis(m: Mission, final: bool = False) -> str:
            "Cite cards as [id]; claims as t#.c#._\n"]
     for g in [g for g in groups if g]:
         try:
-            txt = llm.chat("deep", _sys("You are the synthesis agent. Answer from the evidence in the track reports and ledgers only, "
+            txt = llm.chat("deep", _prose("You are the synthesis agent. Answer from the evidence in the track reports and ledgers only, "
                                         "cite [arxiv_id] and claim ids, say where evidence is missing or contested. "
                                         "Do not force the answer the brief hopes for if the evidence favours another one." +
                                         ("\nTHE OWNER'S RESEARCH TASTE (rank and recommend by it):\n" + m.taste if m.taste else "")),
