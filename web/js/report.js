@@ -156,11 +156,12 @@ export function openReport(opts = {}) {
       while ((m = re.exec(s))) {
         if (m.index > last) frag.appendChild(document.createTextNode(s.slice(last, m.index)));
         if (m[1]) {
-          const p = st.papers.get(m[1]);
+          const aid = m[1];
+          const p = st.papers.get(aid);
           const tr = p && p.tracks && p.tracks[0] ? trackOf(p.tracks[0]) : null;
-          frag.appendChild(h('button.rp-cite', { type: 'button', 'data-hue': (p && p.hue) || (tr && tr.hue) || null, 'data-aid': m[1],
-            title: p ? p.title : m[1], onclick: (e) => { e.stopPropagation(); peek(m[1], e.currentTarget); } },
-          p ? shortName(p.title, m[1]) : m[1]));
+          frag.appendChild(h('button.rp-cite', { type: 'button', 'data-hue': (p && p.hue) || (tr && tr.hue) || null, 'data-aid': aid,
+            title: p ? p.title : aid, onclick: (e) => { e.stopPropagation(); peek(aid, e.currentTarget); } },
+          p ? shortName(p.title, aid) : aid));
         } else frag.appendChild(h('span.rp-cite.bad', { title: 'The model cited a paper the team never read: the citation was removed' }, 'unverified'));
         last = re.lastIndex;
       }
