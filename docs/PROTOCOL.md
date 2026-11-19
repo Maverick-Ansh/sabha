@@ -555,3 +555,51 @@ agent), `/finish`, `/stop`, `/link`, `/help`. The same parser (`Notifier.command
 | PUT | `/api/notify` | `{<channel>: {<field>: value, level}}`; `""` clears a field | same as GET. 400 for a bad level or an ntfy topic that is not 6-64 of `[A-Za-z0-9_-]`. |
 | POST | `/api/notify/test` | `{channel?}` | `{results:[…]}`; 409 when the named channel is not set up |
 | POST | `/api/notify/telegram/find` | | `{id, name}` of the newest chat that messaged the bot (saved as chat_id); 404 when none yet |
+
+## 15. Nirmana: the workshop (`sabha/nirmana.py`, `web/js/nirmana.js`)
+
+The sixth view (`#/nirmana`, key 6). Two halves: **Models** (what runs on the box) and **Flows** (models chained into a pipeline).
+
+### Models
+
+Nirmana edits the same `<data>/run/layout.json` as section 11; the box supervisor applies a change within seconds (start, restart
+on a new signature, stop when a role disappears). Roles beyond `deep` and `reader` are `m3`, `m4`, ... on ports 8003, 8004, ...;
+the supervisor registers each in the hub as `"<label> (<role>)"`. Removing `deep` or `reader` keeps their hub entries (the launcher
+points them at a server that is left); removing an extra role deletes its hub entry and moves the agents seated on it to `deep`.
+A GPU's servers share it: the `util` values on one GPU add up to at most 0.92.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/api/nirmana/forge` | | `{gpus:[{index, name, mem_mb, mem_used_mb, util_pct, share, free_share}], servers:[{role, hf, label, gpus, tp, port, util, ctx, max_ctx, ctx_fit, weights_gib, status, detail, model_id, live:{kv_pct, running, waiting, gen_tps, prompt_tps}, spark:[gen_tps…]}], by, hf_token}`. `live` comes from the server's `/metrics` at request time; `ctx_fit` is the longest context whose KV cache fits next to the weights. |
+| POST | `/api/nirmana/plan` | `{hf, gpus, ctx, replace?}` | `{model, fits, why, share, gpus, ctx_fit, ctx, util}`. `hf` may be `owner/name` or a huggingface.co link. |
+| POST | `/api/nirmana/load` | `{hf, gpus, ctx, replace?}` | `{role, server, note}`. The first free of deep, reader, m3…; 409 when it does not fit or the GPU is full. |
+| POST | `/api/nirmana/models/{role}/ctx` | `{ctx}` | `{role, ctx, note}`; restarts that server. 409 above `ctx_fit`, 400 below 2048. |
+| DELETE | `/api/nirmana/models/{role}` | | `{removed, note}` |
+| POST | `/api/nirmana/try` | `{model_id, prompt, system?, max_tokens?}` | `{try_id}`; the reply streams as `nirmana.delta {try_id, text|thinking}`, then `{try_id, done, error, ttft_ms, ms, tokens, tps, prompt_tokens}` |
+
+### Flows
+
+A flow is `{id, name, blurb, stages:[{id, kind, title, model, agent, prompt, options:[{label, goto}], max_tokens}]}` (1-12 stages).
+`model` is a hub model id or a role (`deep`, `reader`, `m3`) that follows whatever serves it. In `prompt`, `{input}` is the text
+so far and `{start}` the run's input. Kinds:
+
+- `decide`: the model answers `{"choice", "why"}`; each option's `goto` is `next`, `end` or another stage's title. The text passes
+  through a gate unchanged. A stage some gate can jump to runs only when that gate picked it; after it the run goes on (branches merge).
+- `think`: the model's answer becomes the text.
+- `agent`: the text becomes a Work mission for `agent` (any crew agent when empty); the stage waits (at most 45 min) and passes on
+  `result_text`. Stopping the run stops the mission.
+- `search`: `webtools.search` for the text; `read`: `webtools.page_text` of the first link in the text.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/api/nirmana/flows` | | `{flows, templates, runs:[brief], kinds}` |
+| POST | `/api/nirmana/flows` | flow | the saved flow (400 for a bad stage, a gate with fewer than two options) |
+| PUT / DELETE | `/api/nirmana/flows/{id}` | flow / | the saved flow / `{ok}` |
+| POST | `/api/nirmana/runs` | `{flow_id, input}` or `{flow:{name, stages}, input}` | the run (429 when four are running) |
+| GET | `/api/nirmana/runs/{id}` | | the run |
+| POST | `/api/nirmana/runs/{id}/stop` | | the run |
+
+A run is `{id, flow_id, flow_name, flow, input, status: running|done|failed|stopped, current, output, error, ms, created_ts, ended_ts,
+stages:[{id, title, kind, status: waiting|running|done|skipped|stopped, model, output, choice, why, goto, prompt, ms, ttft_ms,
+tokens_in, tokens_out, mission_id, error}]}`, kept in `<data>/nirmana/runs/` (newest 200). Events: `nirmana.run {run}` (persisted, on
+every stage change) and `nirmana.delta {run_id, stage_id, text|thinking}` (ephemeral, the streamed pieces).

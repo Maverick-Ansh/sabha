@@ -6,9 +6,9 @@ import { isMuted, setMuted } from './notify.js';
 import { lotusGlyph } from './lotus.js';
 import { currentTheme, toggleTheme } from './theme.js';
 
-export const MODES = ['research', 'watch', 'talk', 'work', 'council'];
-const LABEL = { research: 'Research', watch: 'Watch', talk: 'Talk', work: 'Work', council: 'Council' };
-const TAB_ICON = { research: 'flask', watch: 'orbit', talk: 'chat', work: 'board', council: 'crew' };
+export const MODES = ['research', 'watch', 'talk', 'work', 'council', 'nirmana'];
+const LABEL = { research: 'Research', watch: 'Watch', talk: 'Talk', work: 'Work', council: 'Council', nirmana: 'Nirmana' };
+const TAB_ICON = { research: 'flask', watch: 'orbit', talk: 'chat', work: 'board', council: 'crew', nirmana: 'loom' };
 
 function shortGpu(name) {
   const s = String(name || 'GPU').replace(/NVIDIA|Tesla|GeForce|Corporation/gi, '').trim();

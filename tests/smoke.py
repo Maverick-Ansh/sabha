@@ -913,6 +913,66 @@ async def main() -> int:
         st, r = await api.call("POST", "/api/catalog/use", {"hf": "cyankiwi/Qwen3.5-9B-AWQ-4bit", "as": "reader"})
         check("catalog: no reader seat in a one-model layout -> 409", st == 409, str(r)[:200])
 
+        # ---------------- Nirmana: models from the app, context windows, flows that show their work
+        st, r = await api.call("POST", "/api/catalog/use", {"preset": "balanced-default"})
+        st, fg = await api.call("GET", "/api/nirmana/forge")
+        check("nirmana: forge shows 2 GPUs and the deep + reader instruments", st == 200 and len(fg["gpus"]) == 2
+              and [s["role"] for s in fg["servers"]] == ["deep", "reader"] and all(s["ctx_fit"] >= 8192 for s in fg["servers"]), str(fg)[:300])
+        st, p = await api.call("POST", "/api/nirmana/plan", {"hf": "https://huggingface.co/Qwen/Qwen3.5-0.8B", "gpus": [1], "ctx": 8192})
+        check("nirmana: a huggingface.co link is understood; GPU 1 is full with the reader", st == 200 and p["model"]["hf"] == "Qwen/Qwen3.5-0.8B"
+              and p["fits"] == "no", str(p)[:200])
+        st, r = await api.call("POST", "/api/nirmana/models/reader/ctx", {"ctx": 131072})
+        check("nirmana: a context that does not fit -> 409", st == 409, str(r)[:200])
+        st, r = await api.call("POST", "/api/nirmana/models/reader/ctx", {"ctx": 16384})
+        lay = json.loads((data_dir / "run" / "layout.json").read_text("utf-8"))
+        check("nirmana: the context slider rewrites the layout", st == 200 and next(s for s in lay["servers"] if s["role"] == "reader")["ctx"] == 16384)
+        st, r = await api.call("DELETE", "/api/nirmana/models/reader")
+        st2, r2 = await api.call("POST", "/api/nirmana/load", {"hf": "Qwen/Qwen3.5-2B", "gpus": [1], "ctx": 16384})
+        st3, r3 = await api.call("POST", "/api/nirmana/load", {"hf": "Qwen/Qwen3.5-0.8B", "gpus": [0], "ctx": 8192})
+        lay = json.loads((data_dir / "run" / "layout.json").read_text("utf-8"))
+        roles = {s["role"]: s for s in lay["servers"]}
+        check("nirmana: remove, then load into the free seat and an extra role on its own port",
+              st == 200 and st2 == 200 and r2["role"] == "reader" and st3 in (200, 409)
+              and (st3 == 409 or (r3["role"] == "m3" and roles["m3"]["port"] == 8003)), f"{r} {r2} {r3}"[:300])
+        if st3 == 200:
+            await api.call("DELETE", "/api/nirmana/models/m3")
+        st, fl = await api.call("GET", "/api/nirmana/flows")
+        check("nirmana: three templates", st == 200 and [t["id"] for t in fl["templates"]] == ["gatekeeper", "scout", "triage"])
+        gate = next(t for t in fl["templates"] if t["id"] == "gatekeeper")
+        st, f = await api.call("POST", "/api/nirmana/flows", {"name": "Gate test", "stages": gate["stages"]})
+        check("nirmana: save a flow", st == 200 and f["id"].startswith("fl_") and len(f["stages"]) == 3)
+        st, bad = await api.call("POST", "/api/nirmana/flows", {"name": "x", "stages": [{"kind": "decide", "options": [{"label": "a"}]}]})
+        check("nirmana: a gate with one option -> 400", st == 400)
+        if pump.done():  # the hub drops a socket that fell behind (the app reconnects with since): open a fresh one
+            ws = await http.ws_connect(f"{base}/ws?token={TOKEN}")
+            pump = asyncio.create_task(watch.pump(ws))
+            await watch.wait_for(lambda e: e.get("type") == "hello", timeout=10, start=len(watch.events))
+        mark = len(watch.events)
+        st, run = await api.call("POST", "/api/nirmana/runs", {"flow_id": f["id"], "input": "What is 2 + 2?"})
+        ev = await watch.wait_for(lambda e: e["type"] == "nirmana.run" and e["data"]["run"]["id"] == run["id"]
+                                  and e["data"]["run"]["status"] != "running", timeout=60, start=mark)
+        if ev is None:  # say why: the run as the hub sees it, and whether the socket still delivers events
+            _, now_run = await api.call("GET", f"/api/nirmana/runs/{run.get('id')}")
+            print(f"  debug: POST {st} run={str(run)[:160]} hub={str(now_run)[:300]} events={len(watch.events)} pump_done={pump.done()}")
+        rr = ev["data"]["run"] if ev else {}
+        sts = [s["status"] for s in rr.get("stages") or []]
+        gate_rec = (rr.get("stages") or [{}])[0]
+        took_quick = gate_rec.get("choice") == "quick"
+        check("nirmana: the gate picks, says why, and exactly one branch runs", rr.get("status") == "done" and gate_rec.get("why")
+              and sts == (["done", "skipped", "done"] if took_quick else ["done", "done", "skipped"]), str(rr)[:400])
+        check("nirmana: stages stream as nirmana.delta", any(e["type"] == "nirmana.delta" and e["data"].get("run_id") == run["id"] for e in watch.events[mark:]))
+        mock_id = next(m["id"] for m in state["models"] if m.get("kind") == "mock")
+        st, t = await api.call("POST", "/api/nirmana/try", {"model_id": mock_id, "prompt": "hello there"})
+        ev = await watch.wait_for(lambda e: e["type"] == "nirmana.delta" and e["data"].get("try_id") == t.get("try_id") and e["data"].get("done"),
+                                  timeout=30, start=mark)
+        check("nirmana: try streams and reports speed", st == 200 and ev is not None and not ev["data"]["error"] and ev["data"]["tokens"] > 0)
+        st, run2 = await api.call("POST", "/api/nirmana/runs", {"input": "draft", "flow": {"name": "Unsaved",
+                                  "stages": [{"kind": "think", "title": "One", "model": mock_id, "prompt": "Shorten: {input}"}]}})
+        ev = await watch.wait_for(lambda e: e["type"] == "nirmana.run" and e["data"]["run"]["id"] == run2.get("id")
+                                  and e["data"]["run"]["status"] != "running", timeout=30, start=mark)
+        check("nirmana: an unsaved flow runs straight from the editor", st == 200 and ev and ev["data"]["run"]["status"] == "done"
+              and ev["data"]["run"]["output"])
+
         await runner.cleanup()
         runner = None
         state_file = data_dir / "state.json"

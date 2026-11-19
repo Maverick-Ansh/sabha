@@ -37,6 +37,8 @@ your laptop / phone                     Colab or Kaggle box
      before it answers; each lookup shows in the reply. Flip the composer to Mission for long work.
    - **Council**: give it an arXiv id; the agents split the paper, discuss it and write a verdict.
    - **Work**: give an agent a task; it plans, searches the web, runs tools and reports back.
+   - **Nirmana**: the workshop. Load any model from Hugging Face onto a GPU, remove it, drag its context window,
+     try it, and chain models into flows (a small model can gate a big one) whose every step you watch as it runs.
 
 Measured on a fresh Kaggle 2x T4 session: the link in 47 s, the agent tools and vLLM installed in 4 min, model
 downloads under 2 min (while installing), then 10.5 min of model warm-up: about 15 min in all. Qwen3.5-9B (4-bit) on GPU 0 does the deep thinking, Qwen3.5-4B on GPU 1 reads.
@@ -142,6 +144,15 @@ attention. vLLM is pinned to 0.33.0: 0.34.0 fails on the T4 (its FlashInfer JIT 
   gives each agent one part. They write briefs at the same time, discuss for a few rounds,
   look things up on the web when a point needs it, and the chair writes a verdict. You can
   speak at any time. A message after the verdict starts one more round.
+- **Nirmana.** The workshop. **Models**: each GPU is drawn as a vessel holding the models on it. Each model is a
+  card with its live state (the vLLM log line while it loads), a context-window slider capped at what fits on its
+  GPU, how full its KV cache is right now, tokens per second, a *Try* box that streams a prompt straight at it, and
+  *Remove*. *Load a model* takes a curated pick, a Hugging Face search, or a pasted `owner/name` or huggingface.co
+  link, checks that it fits, and the box downloads and starts it next to the others. **Flows**: chain stages:
+  *Decide* (a model picks a branch and says why), *Think* (your own instructions), *Agent* (a crew agent takes it as
+  a real mission with tools), *Search* and *Read* (key-free web). Run one and the work plays out on a lit thread:
+  each stage streams its output, a gate lights the option it chose and its reason, and every stage shows its model,
+  time to first token, tokens and seconds.
 
 ## Research on your phone
 
@@ -208,6 +219,7 @@ Do not share the link.
 | `sabha/` | The hub. One aiohttp process: REST, WebSocket, model launcher, harness runs. |
 | `sabha/harness/` | Adapters. `dsh` (real agents), `mock` (demo), `chat` (no tools). |
 | `sabha/council.py` | Council sessions: split a paper, briefs, rounds, verdict. |
+| `sabha/nirmana.py` | Nirmana: load / remove / resize models from the app, live vLLM numbers, Try, flows and their runs. |
 | `sabha/research/` | The research daemon: paper workers, scouting, memory files, `live.py` (what each agent is doing), `inbox.py` (commands from the phone). |
 | `sabha/research_api.py` | The hub's Research endpoints: reads the daemon's data repo, queues commands. |
 | `scripts/research_hub.sh` | Starts the hub on the box next to a running daemon and writes the phone link. |

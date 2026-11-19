@@ -30,6 +30,8 @@ UA = {"User-Agent": "sabha-box/1"}
 PORTS = {"deep": 8001, "reader": 8002}
 DTYPE_BYTES = {"F64": 8, "I64": 8, "F32": 4, "I32": 4, "U32": 4, "BF16": 2, "F16": 2, "I16": 2, "U16": 2,
                "F8_E4M3": 1, "F8_E5M2": 1, "I8": 1, "U8": 1, "BOOL": 1}
+LLM_TAGS = {"text-generation", "image-text-to-text", "text2text-generation", "conversational", "any-to-any", "visual-question-answering"}
+NOT_LLM_LIBS = {"diffusers", "sentence-transformers", "timm", "open_clip", "speechbrain", "pyannote-audio", "nemo"}
 BAD_REPO = re.compile(r"gguf|mlx|exl2|exl3|nvfp4|-onnx|openvino|tiny-random|\bbnb\b|bnb-4bit|-4bit-mlx", re.I)
 
 # family -> serving flags. Parsers only where they are known to work (an unknown parser name stops vLLM).
@@ -284,7 +286,15 @@ def lookup(hf: str) -> dict:
     cur = entry(hf)
     if cur:
         return cur
-    info = _get(HF_API + f"models/{urllib.parse.quote(hf, safe='/')}?expand[]=safetensors&expand[]=config&expand[]=pipeline_tag&expand[]=gated&expand[]=downloads")
+    info = _get(HF_API + f"models/{urllib.parse.quote(hf, safe='/')}?expand[]=safetensors&expand[]=config&expand[]=pipeline_tag"
+                "&expand[]=gated&expand[]=downloads&expand[]=library_name")
+    # vLLM serves language models. A pasted id skips search's tag filter, so check here: a diffusers image model
+    # (Stable Diffusion) was accepted once, downloaded 18 GB and could never start.
+    tag, lib = info.get("pipeline_tag") or "", info.get("library_name") or ""
+    if lib in NOT_LLM_LIBS or (tag and tag not in LLM_TAGS):
+        kind = tag or lib
+        raise ApiError(400, f"{hf} is {'an' if kind[:1] in 'aeiou' else 'a'} {kind} model. Sabha serves language models with vLLM (text generation, "
+                            "or image-text-to-text chat models), so it cannot load this one.")
     if info.get("gated"):
         gated = True
     else:
@@ -298,7 +308,9 @@ def lookup(hf: str) -> dict:
     except ApiError:
         pass
     arch = " ".join(cfg.get("architectures") or [])
-    quant = (cfg.get("quantization_config") or (cfg.get("text_config") or {}).get("quantization_config") or {}).get("quant_method", "")
+    if not arch:
+        raise ApiError(400, f"{hf} has no config.json naming a model architecture, so vLLM cannot load it")
+    quant =(cfg.get("quantization_config") or (cfg.get("text_config") or {}).get("quantization_config") or {}).get("quant_method", "")
     min_sm = 80 if str(quant).lower() in ("fp8", "mxfp4", "compressed-tensors") and "awq" not in hf.lower() else 75
     if str(quant).lower() in ("nvfp4", "modelopt_fp4"):
         min_sm = 100

@@ -5,4 +5,4 @@ API and a WebSocket event stream, starts harness runs, and keeps its state on
 disk. The contract with the web UI is docs/PROTOCOL.md.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

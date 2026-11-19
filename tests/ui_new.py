@@ -39,6 +39,32 @@ async def main(a):
                     await loc.click(timeout=4000)
                     await page.wait_for_timeout(1200)
 
+                if a.only == "nirmana":  # the workshop: instruments, the load sheet, a flow run live and finished
+                    try:
+                        await page.goto(a.base + "#/nirmana" + tok)
+                        await page.wait_for_timeout(5000)
+                        await snap("nm_models", full=sz == "m")
+                        await page.locator(".nm-head + .nm-models .btn.brand").first.click(timeout=4000)
+                        await page.wait_for_timeout(2500)
+                        await page.locator(".nm-pick").nth(2).click(timeout=4000)
+                        await page.wait_for_timeout(2500)
+                        await snap("nm_load")
+                        await page.keyboard.press("Escape")
+                        await page.wait_for_timeout(500)
+                        await page.locator(".nm-seg button", has_text="Flows").click(timeout=4000)
+                        await page.wait_for_timeout(2500)
+                        await page.locator(".nm-tpl").first.click(timeout=4000)
+                        await page.wait_for_timeout(600)
+                        await page.locator(".nm-run-in").fill(a.ask)
+                        await page.locator(".nm-dock-act .btn.brand").click(timeout=4000)
+                        await page.wait_for_timeout(9000)
+                        await snap("nm_flow_live")
+                        await page.wait_for_timeout(a.flow_wait * 1000)
+                        await snap("nm_flow_done", full=True)
+                    except Exception as e:
+                        errors.append(f"{where}: nirmana: {str(e)[:200]}")
+                    await ctx.close()
+                    continue
                 await page.goto(a.base + "#/watch" + tok)  # the orbit is drawn on a canvas: theme colours are set in JS
                 await page.wait_for_timeout(6000)
                 await snap("watch")
@@ -82,4 +108,7 @@ if __name__ == "__main__":
     ap.add_argument("--tag", default="n")
     ap.add_argument("--themes", default="light,dark")
     ap.add_argument("--sizes", default="d,m")
+    ap.add_argument("--only", default="", help="nirmana: shoot only the Nirmana tour")
+    ap.add_argument("--ask", default="Why does the sky look blue? One paragraph.")
+    ap.add_argument("--flow-wait", type=int, default=40)
     asyncio.run(main(ap.parse_args()))

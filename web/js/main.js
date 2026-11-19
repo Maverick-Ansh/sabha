@@ -10,6 +10,7 @@ import { createTalk } from './talk.js';
 import { createWork } from './work.js';
 import { createCouncil } from './council.js';
 import { createResearch, researchAvailable } from './research.js';
+import { createNirmana } from './nirmana.js';
 import { createBoot } from './boot.js';
 import { openDrawer } from './drawer.js';
 import { openCrew } from './crew.js';
@@ -35,7 +36,7 @@ const root = document.getElementById('app');
 let helloHead = 0, helloSeen = false, pongSeen = false, conn = null, gateEl = null, mode = null;
 
 // ---------- views ----------
-const views = { research: createResearch(), watch: createWatch(), talk: createTalk(), work: createWork(), council: createCouncil() };
+const views = { research: createResearch(), watch: createWatch(), talk: createTalk(), work: createWork(), council: createCouncil(), nirmana: createNirmana() };
 const topbar = createTopbar({ onMode: (m) => setMode(m), onCrew: () => openCrew(), onPalette: () => openPalette() });
 const viewsEl = h('main.views', null, Object.values(views).map((v) => v.el));
 const bootStrip = createBoot();
@@ -62,7 +63,7 @@ function setMode(next) {
   inEl.classList.remove('entering'); void inEl.offsetWidth; inEl.classList.add('entering');
   views[mode].setActive(true);
 }
-const modeFromHash = () => { const m = location.hash.match(/^#\/(research|watch|talk|work|council)\b/); return m ? m[1] : null; };
+const modeFromHash = () => { const m = location.hash.match(/^#\/(research|watch|talk|work|council|nirmana)\b/); return m ? m[1] : null; };
 addEventListener('hashchange', () => { const m = modeFromHash(); if (m) setMode(m); });
 
 nav.go = setMode;
@@ -82,7 +83,7 @@ addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
   if (typing(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
   if (document.querySelector('.modal, .drawer, .slideover, .r-sheet')) return;
-  const i = ['1', '2', '3', '4', '5'].indexOf(e.key);
+  const i = ['1', '2', '3', '4', '5', '6'].indexOf(e.key);
   if (i >= 0) { e.preventDefault(); setMode(MODES[i]); }
 });
 
