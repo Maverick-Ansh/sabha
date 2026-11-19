@@ -46,6 +46,29 @@ async def main(a):
                         await snap(name)
                     await ctx.close()
                     continue
+                if a.only == "library":  # New research, the Library tab, a report kept from the reader
+                    try:
+                        await page.goto(a.base + "#/research" + tok)
+                        await page.wait_for_timeout(4500)
+                        await snap("lib_hero")
+                        await page.locator(".r-start").first.click(timeout=4000)
+                        await page.wait_for_timeout(1400)
+                        await snap("lib_new")
+                        await page.locator('.r-tabs button[data-tab="library"]').click(timeout=4000)
+                        await page.wait_for_timeout(2500)
+                        await snap("lib_shelf", full=True)
+                        await page.locator(".lb-card").first.click(timeout=4000)
+                        await page.wait_for_timeout(6000)
+                        await snap("lib_reader")
+                        await page.keyboard.press("Escape")
+                        await page.wait_for_timeout(600)
+                        await page.locator('.r-tabs button[data-tab="library"]').click(timeout=4000)
+                        await page.wait_for_timeout(2500)
+                        await snap("lib_shelf2")
+                    except Exception as e:
+                        errors.append(f"{where}: library: {str(e)[:200]}")
+                    await ctx.close()
+                    continue
                 if a.only == "report":  # the run-length dial, then the report reader: top, a citation peek, findings, notebook, papers
                     try:
                         await page.goto(a.base + "#/research" + tok)
