@@ -5,6 +5,8 @@ import { fmtDur, serverNow } from './format.js';
 import { isMuted, setMuted } from './notify.js';
 import { lotusGlyph } from './lotus.js';
 import { currentTheme, toggleTheme } from './theme.js';
+import { openProfile, initials } from './profile.js';
+import { get } from './api.js';
 
 export const MODES = ['research', 'watch', 'talk', 'work', 'council', 'nirmana'];
 const LABEL = { research: 'Research', watch: 'Watch', talk: 'Talk', work: 'Work', council: 'Council', nirmana: 'Nirmana' };
@@ -47,6 +49,16 @@ export function createTopbar({ onMode, onCrew, onPalette }) {
   paintTheme();
   addEventListener('sabha-theme', paintTheme);
   const dot = h('span.conn-dot', { role: 'status' });
+  // your profile: initials once you give a name, keys inside (profile.js)
+  const meFace = h('span.me-face', null, icon('crew', 15));
+  const paintMe = (st) => {
+    const ini = initials(st && st.profile && st.profile.name);
+    meFace.replaceChildren(ini ? document.createTextNode(ini) : icon('crew', 15));
+    meBtn.classList.toggle('named', !!ini);
+    meBtn.title = ini ? `${st.profile.name} · your profile and keys` : 'Your profile and keys';
+  };
+  const meBtn = h('button.me-btn', { title: 'Your profile and keys', 'aria-label': 'Your profile and keys', onclick: () => openProfile(paintMe) }, meFace);
+  get('/api/settings').then(paintMe).catch(() => {});
   const demo = h('span.chip.mono.demo-chip', { hidden: true }, 'demo');
 
   const el = h('header.topbar', null,
@@ -59,7 +71,7 @@ export function createTopbar({ onMode, onCrew, onPalette }) {
       h('button.btn.ghost.icon.palette-btn', { title: 'Command palette (Ctrl+K)', onclick: onPalette }, icon('search', 16)),
       themeBtn, muteBtn,
       h('button.btn.crew-btn', { onclick: onCrew }, icon('crew', 15), h('span', null, 'Crew')),
-      dot));
+      meBtn, dot));
 
   function setMode(mode) {
     btns.forEach((b, i) => b.setAttribute('aria-pressed', String(MODES[i] === mode)));

@@ -166,13 +166,18 @@ export function createTaste({ onChange } = {}) {
     }
     paint();
   }
-  // The hero's New research button: open the form, bring it into view, put the cursor in the question.
+  // New research (hero and sidebar): open the form with an empty question, bring it into view, cursor in the question.
   function focusForm() {
     open = true;
     paint();
     el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     el.classList.remove('t-glow'); void el.offsetWidth; el.classList.add('t-glow');
-    setTimeout(() => { topicIn.focus(); topicIn.select(); }, 450);
+    if (!running && topicIn.value) {  // a new research starts from a blank question (your taste and loved papers stay)
+      topicIn.value = '';
+      topicIn.dispatchEvent(new Event('input'));
+      saveTaste();
+    }
+    setTimeout(() => topicIn.focus(), 450);
   }
   paint();
   paintMode();

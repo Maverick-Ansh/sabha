@@ -680,3 +680,26 @@ that index, so reports from earlier boxes stay in the Library and open from GitH
 
 Entry fields: `lid, mission, title, question, one_line, started, papers, waves, tracks, hours, status, final, saved_at,
 digest, on_box, in_github, live_mission` (set when the run's folder is on this box: the cover opens the live reader).
+
+## 18. Your profile, keys and the default models
+
+The avatar in the top bar opens **Your profile**: a name and a line about you (plain text, `settings.json` fields
+`name`, `about`, returned in `GET /api/settings` as `profile`) and the keys: GitHub (repository + token), Tavily,
+Hugging Face, Brave, Serper. Keys follow the rules of section 9: sent once, never returned (set + last four), kept in
+`settings.json` (mode 600) and the hub's environment, never written into reports, exports, the library or GitHub.
+Notebook secrets with the same names (`SABHA_GIT_REPO`, `SABHA_GIT_TOKEN`, `TAVILY_API_KEY`, `HF_TOKEN`,
+`BRAVE_API_KEY`, `SERPER_API_KEY`) fill them on every new box.
+
+| Method & path | Returns |
+|---|---|
+| `POST /api/settings/check-github` | `{ ok, kind: classic|fine-grained, repo, private, can_write, scopes, warnings[] }` or `{ ok: false, error }` |
+| `POST /api/settings/forget` | settings with every key removed (the profile stays) |
+| `GET /api/nirmana/default` | `{ mine, source, servers: [{role, hf, label, gpus, ctx}] }`: the setup a fresh box starts with |
+| `POST /api/nirmana/default` | makes the box's current setup the default: `<data>/default_layout.json` and, with GitHub, `config/default_layout.json` |
+
+`box.py up` imports the secrets first, then picks models: the saved layout of this session, else your default
+(this box, then GitHub), else Sabha's preset (Qwen3.5 9B AWQ as deep, Qwen3.5 4B as reader on 2x T4).
+
+New research empties the question field (the taste and loved papers stay). In Watch, the Everyone stream's left edge
+and the timeline's top edge drag to resize; a double-click folds either away (a tab brings the stream back); sizes
+are kept per browser (`sabha.watch.sizes`).

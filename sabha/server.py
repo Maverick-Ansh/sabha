@@ -37,7 +37,7 @@ from .nirmana import Nirmana, add_routes as add_nirmana_routes
 from .research_feed import ResearchFeed
 from . import catalog
 from .research import longmem
-from .settings import Settings, Taste
+from .settings import Settings, Taste, check_github, forget_keys
 from .store import Store
 from .talk import TalkManager, thread_public
 from .telemetry import Telemetry, detect_platform
@@ -350,6 +350,14 @@ async def get_boot(request):
 
 async def get_settings(request):
     return web.json_response(_hub(request).settings.public())
+
+
+async def check_github_route(request):
+    return web.json_response(await asyncio.to_thread(check_github, _hub(request).settings))
+
+
+async def forget_route(request):
+    return web.json_response(forget_keys(_hub(request).settings))
 
 
 async def put_settings(request):
@@ -894,6 +902,8 @@ def create_app(hub: Hub) -> web.Application:
     r.add_get("/api/boot", get_boot)
     r.add_get("/api/settings", get_settings)
     r.add_put("/api/settings", put_settings)
+    r.add_post("/api/settings/check-github", check_github_route)
+    r.add_post("/api/settings/forget", forget_route)
     r.add_get("/api/taste", get_taste)
     r.add_put("/api/taste", put_taste)
     r.add_post("/api/research/start", research_start)

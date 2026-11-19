@@ -2,7 +2,7 @@
 // and flows: stages chained into a pipeline whose every step is shown while it runs (PROTOCOL.md section 15).
 import { h, icon, setText, clear, autogrow, append } from './dom.js';
 const fill = (el, ...kids) => append(clear(el), kids);  // like el.append, but skips null (native append prints "null")
-import { get, post, put, del } from './api.js';
+import { get, post, put, del, api } from './api.js';
 import { subscribe, getState } from './store.js';
 import { fmtNum, fmtAgo, fmtDur, truncate } from './format.js';
 import { renderInto } from './md.js';
@@ -52,8 +52,9 @@ export function createNirmana() {
   const vesselsEl = h('div.nm-vessels');
   const gridEl = h('div.nm-grid');
   const byEl = h('p.nm-by');
+  const defaultEl = h('div.nm-default');
   modelsEl.append(
-    h('section.nm-sec', null, h('div.nm-sec-h', null, h('h2', null, 'The box'), byEl), vesselsEl),
+    h('section.nm-sec', null, h('div.nm-sec-h', null, h('h2', null, 'The box'), byEl), vesselsEl, defaultEl),
     h('section.nm-sec', null, h('div.nm-sec-h', null, h('h2', null, 'Instruments'),
       h('button.btn.brand.sm', { onclick: () => openLoad() }, icon('plus', 14), 'Load a model')), gridEl));
   const cards = new Map(); // role -> card api
@@ -63,6 +64,35 @@ export function createNirmana() {
     paintVessels();
     paintGrid();
     flows.models(forge);
+    if (!dflt) loadDefault(); else paintDefault();
+  }
+
+  // ---------- the default setup for new boxes (Sabha's preset until you make one) ----------
+  let dflt = null;
+  const short = (hf) => String(hf || '').split('/').pop();
+  async function loadDefault() {
+    try { dflt = await get('/api/nirmana/default'); paintDefault(); } catch { /* an older hub */ }
+  }
+  function paintDefault() {
+    if (!dflt || !forge) return;
+    const now = (forge.servers || []).map((x) => `${x.role}=${x.hf || ''}`).sort().join('|');
+    const want = (dflt.servers || []).map((x) => `${x.role}=${x.hf || ''}`).sort().join('|');
+    const same = !!now && now === want;
+    const btn = h('button.btn.sm' + (same ? '' : '.brand'), { disabled: same || !(forge.servers || []).length, onclick: async () => {
+      btn.disabled = true;
+      try {
+        dflt = await api('POST', '/api/nirmana/default');
+        toast('Default saved', { sub: dflt.in_github ? 'Every new box starts with this setup (kept in your GitHub repository).'
+          : (dflt.error || 'Kept on this box. Connect GitHub in your profile so a new box starts with it too.'), tone: dflt.error ? 'sun' : 'mint', timeout: 7000 });
+        paintDefault();
+      } catch (e) { toast('Not saved', { sub: e.message, tone: 'coral' }); btn.disabled = false; }
+    } }, same ? 'This is the default' : 'Make this setup the default');
+    clear(defaultEl).append(
+      h('div.nm-default-text', null,
+        h('span.micro', null, 'new boxes start with'),
+        h('div.nm-default-list', null, (dflt.servers || []).map((x) => h('span.nm-default-chip', null, h('b', null, x.role), ' ', x.label || short(x.hf)))),
+        h('span.nm-default-src', null, dflt.mine ? `your default${dflt.source ? ' · ' + dflt.source : ''}` : "Sabha's default")),
+      btn);
   }
   function loop() { clearTimeout(timer); if (!active) return; refresh().finally(() => { timer = setTimeout(loop, document.hidden ? 9000 : 3000); }); }
 

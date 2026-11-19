@@ -5,6 +5,7 @@ import { hueOf, fmtNum, truncate, tone } from './format.js';
 import { createOrbit } from './orbit.js';
 import { createStream } from './stream.js';
 import { createTimeline } from './timeline.js';
+import { makeResizable } from './resize.js';
 import { openComposerModal } from './composer.js';
 import { get } from './api.js';
 import { nav } from './nav.js';
@@ -80,7 +81,9 @@ export function createWatch() {
   const stream = createStream({ onLive: () => timeline && timeline.clearReplay() });
   timeline = createTimeline({ onJump: (seq) => stream.jumpTo(seq) });
   const streamPanel = h('section.stream-panel', null, stream.el);
-  const el = h('div.view.watch', { 'data-view': 'watch' }, roster, stage, streamPanel, h('section.tl-panel', null, timeline.el));
+  const tlPanel = h('section.tl-panel', null, timeline.el);
+  const el = h('div.view.watch', { 'data-view': 'watch' }, roster, stage, streamPanel, tlPanel);
+  makeResizable(el, streamPanel, tlPanel);
 
   const orbit = createOrbit(canvas, { onFocus: (id) => focus(id), onResearch: () => nav.go('research') });
 

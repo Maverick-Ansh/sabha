@@ -65,7 +65,7 @@ HUB_MARK = f"-m sabha --host 127.0.0.1 --port {PORT} "
 SUP_MARK = "box.py supervise"
 SESSION_S = 11.5 * 3600
 BEAT_S = 240
-SECRET_NAMES = {"TAVILY_API_KEY": "tavily_key", "HF_TOKEN": "hf_token",
+SECRET_NAMES = {"TAVILY_API_KEY": "tavily_key", "HF_TOKEN": "hf_token", "BRAVE_API_KEY": "brave_key", "SERPER_API_KEY": "serper_key",
                 "SABHA_GIT_REPO": "git_repo", "SABHA_GIT_TOKEN": "git_token"}
 NOTIFY = os.path.join(DATA, "notify.json")
 NOTIFY_SECRETS = {  # secret name -> (channel, field); the same table as SECRET_ENV in sabha/notify.py
@@ -339,6 +339,27 @@ def default_servers(ok: list[dict]) -> list[dict]:
     return servers
 
 
+def my_default(have: set) -> list[dict]:
+    """The owner's default setup (Nirmana's "Make this the default"): <data>/default_layout.json, else
+    config/default_layout.json in the GitHub repository from the settings or secrets. [] when none fits these GPUs."""
+    doc = read_json(os.path.join(DATA, "default_layout.json"), None)
+    if not doc:
+        s = read_json(SETTINGS, {}) or {}
+        repo, tok = s.get("git_repo") or os.environ.get("SABHA_GIT_REPO", ""), s.get("git_token") or os.environ.get("SABHA_GIT_TOKEN", "")
+        if repo and tok:
+            try:
+                req = urllib.request.Request(f"https://api.github.com/repos/{repo}/contents/config/default_layout.json",
+                                             headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github.raw",
+                                                      "User-Agent": "sabha-box"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    doc = json.loads(r.read() or b"null")
+            except Exception:  # noqa: BLE001 (no default saved yet, or offline: Sabha's preset)
+                doc = None
+    servers = [x for x in ((doc or {}).get("servers") or []) if isinstance(x, dict) and x.get("hf") and x.get("role")
+               and set(x.get("gpus") or [0]) <= have] if isinstance(doc, dict) else []
+    return servers
+
+
 def layout(g: list[dict]) -> tuple[list[dict], str]:
     """(models to serve, problem). The saved layout (the app's Models panel) when it fits these GPUs, else the default."""
     if os.environ.get("SABHA_MODELS", "1") == "0":
@@ -355,9 +376,11 @@ def layout(g: list[dict]) -> tuple[list[dict], str]:
     have = {x["index"] for x in ok}
     saved = [x for x in (read_json(LAYOUT, {}) or {}).get("servers") or []
              if isinstance(x, dict) and x.get("hf") and x.get("role") and set(x.get("gpus") or [0]) <= have]
-    servers = saved or default_servers(ok)
+    mine = [] if saved else my_default(have)
+    servers = saved or mine or default_servers(ok)
     if not saved and servers:
-        write_json(LAYOUT, {"servers": servers, "by": "default for " + ", ".join(x["name"] for x in ok), "ts": time.time()})
+        write_json(LAYOUT, {"servers": servers, "ts": time.time(),
+                            "by": "your default (Nirmana)" if mine else "default for " + ", ".join(x["name"] for x in ok)})
     return [_as_model(x) for x in servers], ""
 
 
@@ -434,6 +457,7 @@ def up() -> str:
     os.makedirs(LOGS, exist_ok=True)
     os.makedirs(RUN, exist_ok=True)
     g = gpus()
+    got = import_secrets()  # first: a GitHub repo and token in the secrets bring the owner's default models
     models, problem = layout(g)
     if problem:
         say(problem)
@@ -452,7 +476,6 @@ def up() -> str:
     except ImportError:
         say("Installing aiohttp (the hub's only dependency)...")
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "aiohttp>=3.9"], check=False)
-    got = import_secrets()
     if got:
         say("Optional settings found: " + ", ".join(got))
 

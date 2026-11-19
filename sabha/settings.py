@@ -19,8 +19,9 @@ from pathlib import Path
 
 from .util import ApiError
 
-SECRET_FIELDS = ("tavily_key", "hf_token", "git_token")
-ENV_OF = {"tavily_key": "TAVILY_API_KEY", "hf_token": "HF_TOKEN"}
+SECRET_FIELDS = ("tavily_key", "hf_token", "git_token", "brave_key", "serper_key")
+ENV_OF = {"tavily_key": "TAVILY_API_KEY", "hf_token": "HF_TOKEN", "brave_key": "BRAVE_API_KEY", "serper_key": "SERPER_API_KEY"}
+PROFILE_FIELDS = {"name": 60, "about": 240}  # the profile: plain text, shown back as is (not secret)
 GIT_REPO = re.compile(r"^(?:https://github\.com/)?([A-Za-z0-9][A-Za-z0-9._\-]*)/([A-Za-z0-9._\-]+?)(?:\.git)?/?$")
 ARXIV_ID = re.compile(r"(?<![\d.])(\d{4}\.\d{4,5})(?:v\d+)?(?![\d])")
 TASTE_MAX, TOPIC_MAX, LOVES_MAX = 6000, 3000, 30
@@ -69,7 +70,7 @@ class Settings:
                 self._ours.discard(var)
 
     def public(self) -> dict:
-        out: dict = {"git_repo": self.get("git_repo")}
+        out: dict = {"git_repo": self.get("git_repo"), "profile": {k: self.get(k) for k in PROFILE_FIELDS}}
         for field in SECRET_FIELDS:
             value = self.get(field)
             env = os.environ.get(ENV_OF.get(field, ""), "") if not value and field in ENV_OF else ""
@@ -83,6 +84,16 @@ class Settings:
         return out
 
     def update(self, body: dict) -> dict:
+        for field, limit in PROFILE_FIELDS.items():
+            if field in body:
+                value = body[field] if body[field] is not None else ""
+                if not isinstance(value, str):
+                    raise ApiError(400, f"{field} must be text")
+                value = " ".join(value.split())[:limit]
+                if value:
+                    self.d[field] = value
+                else:
+                    self.d.pop(field, None)
         for field in (*SECRET_FIELDS, "git_repo"):
             if field not in body:
                 continue
@@ -102,6 +113,49 @@ class Settings:
         _write(self.path, self.d, 0o600)
         self.apply()
         return self.public()
+
+
+def forget_keys(settings: "Settings") -> dict:
+    """Remove every key this box holds (the profile's name stays). Keys from notebook secrets come back on the next
+    run of the cell; this clears the copies the hub keeps."""
+    for field in (*SECRET_FIELDS, "git_repo"):
+        settings.d.pop(field, None)
+    _write(settings.path, settings.d, 0o600)
+    settings.apply()
+    return settings.public()
+
+
+def check_github(settings: "Settings") -> dict:
+    """Try the GitHub repository and token the box holds, and say what is risky about them. Never returns the token."""
+    import urllib.error
+    import urllib.request
+    repo, tok = settings.get("git_repo"), settings.get("git_token")
+    if not (repo and tok):
+        return {"ok": False, "error": "set a repository and a token first", "warnings": []}
+    kind = "fine-grained" if tok.startswith("github_pat_") else "classic" if tok.startswith(("ghp_", "gho_")) else "other"
+    req = urllib.request.Request(f"https://api.github.com/repos/{repo}", headers={
+        "Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json", "User-Agent": "sabha-profile"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            d = json.loads(r.read() or b"{}")
+            scopes = [x.strip() for x in (r.headers.get("X-OAuth-Scopes") or "").split(",") if x.strip()]
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "kind": kind, "error": {401: "GitHub does not accept this token (expired or revoked?)",
+                                                     404: "the repository does not exist, or this token cannot see it"}.get(e.code, f"GitHub said {e.code}"),
+                "warnings": []}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "kind": kind, "error": f"GitHub not reachable: {type(e).__name__}", "warnings": []}
+    perms = d.get("permissions") or {}
+    warn = []
+    if not d.get("private"):
+        warn.append("The repository is public: anyone can read the reports kept there. Make it private on GitHub.")
+    if kind == "classic":
+        warn.append("This is a classic token" + (f" with scopes {', '.join(scopes)}" if scopes else "") + ": it reaches every repository "
+                    "you have. A fine-grained token limited to this one repository (Contents: read and write) is safer.")
+    if not perms.get("push"):
+        warn.append("This token cannot write to the repository: reports will not be kept there.")
+    return {"ok": True, "kind": kind, "repo": d.get("full_name") or repo, "private": bool(d.get("private")), "can_write": bool(perms.get("push")),
+            "scopes": scopes, "warnings": warn}
 
 
 def clean_loves(value) -> list[str]:

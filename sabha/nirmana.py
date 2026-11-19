@@ -144,6 +144,52 @@ class Nirmana:
         d = self._read(self._layout_path(), {}) or {}
         return d if isinstance(d, dict) else {}
 
+    # ------------------------------------------------------------ the default setup for new boxes
+
+    def _default_path(self) -> Path:
+        return Path(self.hub.cfg.data_dir) / "default_layout.json"
+
+    def default(self) -> dict:
+        """The setup a fresh box starts with: yours (saved here or in GitHub), else Sabha's preset (9B deep + 4B reader)."""
+        mine = self._read(self._default_path(), None)
+        src = "this box" if mine else ""
+        lib = getattr(self.hub, "library", None)
+        if not mine and lib is not None and lib._gh()[0]:
+            try:
+                mine, src = json.loads(lib._call("GET", "config/default_layout.json", raw=True, timeout=15) or b"null"), "GitHub"
+            except Exception:  # noqa: BLE001 (404 or offline: Sabha's preset)
+                mine = None
+        servers = (mine or {}).get("servers") if isinstance(mine, dict) else None
+        if servers:
+            return {"mine": True, "source": src, "servers": [{k: s.get(k) for k in ("role", "hf", "label", "gpus", "ctx")} for s in servers],
+                    "saved": (mine or {}).get("ts")}
+        try:
+            from . import catalog
+            pre = catalog.presets(self._gpus() or [{"index": 0, "mem_mb": 15360, "name": "T4"}, {"index": 1, "mem_mb": 15360, "name": "T4"}])
+            servers = pre[0]["servers"] if pre else []
+        except Exception:  # noqa: BLE001
+            servers = []
+        return {"mine": False, "source": "Sabha", "servers": [{k: s.get(k) for k in ("role", "hf", "label", "gpus", "ctx")} for s in servers]}
+
+    def set_default(self) -> dict:
+        """Make the setup on the box now the default for every new box: saved here and, with GitHub connected, in
+        config/default_layout.json of the repository (the box reads it at start, before it picks models)."""
+        servers = [s for s in self._layout().get("servers") or [] if isinstance(s, dict) and s.get("hf") and s.get("role")]
+        if not servers:
+            raise ApiError(409, "no models are set up on this box yet")
+        doc = {"servers": servers, "ts": time.time(), "by": "Nirmana: made the default"}
+        p = self._default_path()
+        p.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        in_github, err = False, ""
+        lib = getattr(self.hub, "library", None)
+        if lib is not None and lib._gh()[0]:
+            try:
+                lib._put("config/default_layout.json", json.dumps(doc, indent=1), "default models: " + ", ".join(f"{s['role']}={s['hf']}" for s in servers))
+                in_github = True
+            except Exception as e:  # noqa: BLE001
+                err = f"not saved to GitHub: {str(e)[:120]}"
+        return {**self.default(), "in_github": in_github, "error": err}
+
     def _gpus(self) -> list[dict]:
         b = read_boot(self.hub.cfg.data_dir)
         g = [x for x in b.get("gpus") or [] if isinstance(x, dict) and "mem_mb" in x]
@@ -811,6 +857,14 @@ def add_routes(router, hub_of, body_of) -> None:
     router.add_get("/api/nirmana/forge", forge)
     router.add_post("/api/nirmana/plan", plan)
     router.add_post("/api/nirmana/load", load)
+
+    async def get_default(request):
+        return web.json_response(await asyncio.to_thread(nm(request).default))
+
+    async def post_default(request):
+        return web.json_response(await asyncio.to_thread(nm(request).set_default))
+    router.add_get("/api/nirmana/default", get_default)
+    router.add_post("/api/nirmana/default", post_default)
     router.add_post("/api/nirmana/models/{role}/ctx", ctx)
     router.add_delete("/api/nirmana/models/{role}", remove)
     router.add_post("/api/nirmana/try", try_)

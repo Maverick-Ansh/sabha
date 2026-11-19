@@ -717,6 +717,17 @@ async def main() -> int:
         check("settings: key cleared", st == 200 and s["tavily_key"]["set"] is False and "TAVILY_API_KEY" not in os.environ, str(s)[:200])
         st, s = await api.call("PUT", "/api/settings", {"git_repo": "not a repo"})
         check("settings: bad git_repo -> 400", st == 400, str(s)[:200])
+        st, s = await api.call("PUT", "/api/settings", {"name": "  Ada   Lovelace ", "about": "engines", "brave_key": "BSAzyxwvutsrq9876"})
+        check("profile: name and about kept as text, a new search key reaches the environment", st == 200
+              and s["profile"] == {"name": "Ada Lovelace", "about": "engines"} and s["brave_key"]["set"]
+              and os.environ.get("BRAVE_API_KEY") == "BSAzyxwvutsrq9876" and "zyxwvutsrq" not in json.dumps(s), str(s)[:300])
+        st, g = await api.call("POST", "/api/settings/check-github")
+        check("profile: the GitHub check says what is missing (no token, no network call)", st == 200 and g["ok"] is False and "first" in g["error"])
+        st, s = await api.call("POST", "/api/settings/forget")
+        check("profile: forget every key, the name stays", st == 200 and not s["brave_key"]["set"] and "BRAVE_API_KEY" not in os.environ
+              and s["profile"]["name"] == "Ada Lovelace", str(s)[:300])
+        st, d = await api.call("GET", "/api/nirmana/default")
+        check("nirmana: the default setup for new boxes is Sabha's until you make one", st == 200 and d["mine"] is False, str(d)[:200])
         st, t = await api.call("PUT", "/api/taste", {"taste": "I trust ablations over leaderboards. Skip surveys.",
                                                     "loves": "https://arxiv.org/abs/2301.08243v2\nA paper title I like",
                                                     "topic": "Which world models help planning?", "hours": 0.5})
