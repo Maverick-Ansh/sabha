@@ -347,6 +347,19 @@ def _ask(m: Mission, system: str, user: str, max_tokens: int = 1400) -> str:
     return _strip_unknown_cites(m, txt).strip()
 
 
+def _confidence_line(txt: str) -> str:
+    """The answer's last line as 'Confidence: medium, because ...' in its own paragraph: a small model runs it into
+    the prose, or copies the template's 'high|medium' (both seen on a real run)."""
+    mm = re.search(r"\**Confidence\**\s*:\s*\**\s*([A-Za-z|/ ,-]*?)\s*\**\s*(?:,|\.|;|\s-|\bbecause\b)\s*(.*)$", txt, re.S | re.I)
+    if not mm:
+        return txt
+    words = re.findall(r"high|medium|low", mm.group(1).lower())
+    level = words[0] if len(words) == 1 else "medium" if words else "low"
+    reason = " ".join(mm.group(2).split()).strip().rstrip(".")
+    reason = re.sub(r"^because\s+", "", reason, flags=re.I)
+    return txt[:mm.start()].rstrip() + f"\n\nConfidence: {level}" + (f", because {reason}." if reason else ".")
+
+
 def comparison_table(cards: list[dict], k: int = 14) -> str:
     rows = ["| Paper | The idea | Best number | Code |", "|---|---|---|---|"]
     for c in cards[:k]:
@@ -377,15 +390,19 @@ def refine(m: Mission, ask=None) -> str:
                 ranked.append(c)
     ranked.sort(key=lambda c: -(c.get("relevance", 2) + (1 if best_result(c) else 0) + (0.5 if _repo(c) else 0)))
     briefs = "\n".join(_brief(c) for c in ranked[:20])
-    base = (f"TODAY: {time.strftime('%Y-%m-%d', time.gmtime())}\nTHE QUESTION:\n{q}\n\nSTATE OF KNOWLEDGE:\n{k[:4000] or '(none)'}\n\n"
-            f"SYNTHESIS DRAFT:\n{syn[:4000] or '(none)'}\n\nLAB NOTEBOOK (the team's notes during the run):\n{notes_txt or '(none)'}\n\n"
-            f"PAPERS, BEST FIRST (cite as [id]):\n{briefs}\n")
-    rules = ("Rules: cite [arxiv_id] for every fact, only papers listed above; numbers only from the papers' results; say "
-             "plainly where evidence is thin or missing; separate what was measured from what the authors believe. No preamble.")
+    base = (f"TODAY: {time.strftime('%Y-%m-%d', time.gmtime())}\nTHE QUESTION:\n{q}\n\n"
+            f"THE PAPERS THE TEAM READ, BEST FIRST (the ground truth: their titles, methods and numbers; cite as [id]):\n{briefs}\n\n"
+            f"LAB NOTEBOOK (the team's notes while reading):\n{notes_txt or '(none)'}\n\n"
+            f"EARLIER DRAFTS (may name papers wrongly or repeat themselves; where they disagree with THE PAPERS, the papers win):\n"
+            f"STATE OF KNOWLEDGE:\n{k[:3000] or '(none)'}\n\nSYNTHESIS DRAFT:\n{syn[:3000] or '(none)'}\n")
+    rules = ("Rules: cite [arxiv_id] for every fact, only papers in THE PAPERS list, and call a paper only by its title there; "
+             "numbers only from the papers' results; do not repeat a point you already made; say plainly where evidence is thin "
+             "or missing; separate what was measured from what the authors believe. No preamble.")
     short = ask(m, "You write the opening of a finished research report: the answer, for someone who reads only this part.",
                  base + "\nWrite the answer to the question in 5-8 sentences of plain prose (no list, no heading): what the evidence "
                         "says, the two or three papers it rests on, and how sure we can be. Then one last line exactly like "
-                        "'Confidence: high|medium|low, because <reason>'.\n" + rules, 700)
+                        "'Confidence: <one word: high, medium or low>, because <reason>'.\n" + rules, 700)
+    short = _confidence_line(short)
     findings = ask(m, "You write the key findings of a research report. Each finding is specific, carries its number and its source.",
                     base + "\nWrite 5 to 8 key findings as a numbered list. Each item: a bold one-sentence finding, then 1-3 "
                            "sentences of evidence with the numbers and [id] citations, and what it means for the question.\n" + rules, 1500)
