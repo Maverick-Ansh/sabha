@@ -55,6 +55,8 @@ html { scroll-behavior: smooth; }
   html, body { background: var(--paper) !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; animation: none !important; }
   .rp-toc { display: none !important; }
+  .rp-title { background: none !important; -webkit-text-fill-color: var(--ink) !important; color: var(--ink) !important; }
+  .rp-fn, .rp-sec[data-kind="findings"] > ol > li::before { background: none !important; -webkit-text-fill-color: var(--lilac-deep) !important; color: var(--lilac-deep) !important; }
   .rp-layout { display: block !important; }
   .rp-wrap { padding: 0 16mm !important; max-width: none !important; }
   .rp-article { padding-top: 0 !important; }
