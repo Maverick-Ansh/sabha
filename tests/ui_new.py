@@ -46,25 +46,29 @@ async def main(a):
                         await snap(name)
                     await ctx.close()
                     continue
-                if a.only == "library":  # New research, the Library tab, a report kept from the reader
+                if a.only == "library":  # the sidebar: every research, search inside the reports, New research, the library shelf
                     try:
                         await page.goto(a.base + "#/research" + tok)
                         await page.wait_for_timeout(4500)
                         await snap("lib_hero")
-                        await page.locator(".r-start").first.click(timeout=4000)
+                        if sz == "m":
+                            await page.locator(".rs-toggle").first.click(timeout=4000)
+                            await page.wait_for_timeout(700)
+                            await snap("lib_drawer")
+                        await page.locator(".rs-search-in").fill(a.find)
+                        await page.wait_for_timeout(2200)
+                        await snap("lib_search")
+                        await page.locator(".rs-search-in").fill("")
+                        await page.wait_for_timeout(400)
+                        await page.locator(".rs-new").click(timeout=4000)
                         await page.wait_for_timeout(1400)
                         await snap("lib_new")
-                        await page.locator('.r-tabs button[data-tab="library"]').click(timeout=4000)
+                        if sz == "m":
+                            await page.locator(".rs-toggle").first.click(timeout=4000)
+                            await page.wait_for_timeout(700)
+                        await page.locator(".rs-browse").click(timeout=4000)
                         await page.wait_for_timeout(2500)
-                        await snap("lib_shelf", full=True)
-                        await page.locator(".lb-card").first.click(timeout=4000)
-                        await page.wait_for_timeout(6000)
-                        await snap("lib_reader")
-                        await page.keyboard.press("Escape")
-                        await page.wait_for_timeout(600)
-                        await page.locator('.r-tabs button[data-tab="library"]').click(timeout=4000)
-                        await page.wait_for_timeout(2500)
-                        await snap("lib_shelf2")
+                        await snap("lib_shelf")
                     except Exception as e:
                         errors.append(f"{where}: library: {str(e)[:200]}")
                     await ctx.close()
@@ -198,4 +202,5 @@ if __name__ == "__main__":
     ap.add_argument("--only", default="", help="nirmana: shoot only the Nirmana tour")
     ap.add_argument("--ask", default="Why does the sky look blue? One paragraph.")
     ap.add_argument("--flow-wait", type=int, default=40)
+    ap.add_argument("--find", default="planning", help="library tour: what to type in the sidebar search")
     asyncio.run(main(ap.parse_args()))

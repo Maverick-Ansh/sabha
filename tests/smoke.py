@@ -849,6 +849,11 @@ async def main() -> int:
             page = await resp.text()
         check("library: the kept page opens in a new tab (token in the link)", resp.status == 200 and "kept page" in page
               and resp.content_type == "text/html", page[:200])
+        st, sr = await api.call("GET", "/api/library/search?q=kept%20page")
+        check("library: search finds a report by what is inside it", st == 200 and any(x.get("lid") == kept.get("lid") for x in sr.get("hits") or []),
+              str(sr)[:300])
+        st, sr = await api.call("GET", "/api/library/search?q=zzqqxx")
+        check("library: search with no match is empty", st == 200 and sr.get("hits") == [])
         st, lib = await api.call("GET", "/api/library")
         check("library: the run now shows as kept", any(e.get("lid") == kept.get("lid") and e.get("saved_at") for e in lib.get("entries") or []))
         outbox = [json.loads(x) for x in (croot / "state" / "notify.jsonl").read_text("utf-8").splitlines()]

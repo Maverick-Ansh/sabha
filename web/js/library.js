@@ -44,7 +44,7 @@ export function createLibrary(opts = {}) {
   }
 
   function open(e) {
-    if (e.live_mission && opts.onOpen) { opts.onOpen(e); return; }
+    if (opts.onOpen) { opts.onOpen(e); return; }
     window.open(`/api/library/${enc(e.lid)}/html?token=${enc(getToken() || '')}`, '_blank', 'noopener');
   }
 

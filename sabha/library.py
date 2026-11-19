@@ -226,6 +226,45 @@ class Library:
                 log.warning("library: %s not pushed: %s", lid, e)
                 self._remote = (0.0, self._remote[1], f"could not save to GitHub: {str(e)[:120]}")
 
+    # ------------------------------------------------------------ search
+
+    def search(self, q: str, limit: int = 20) -> dict:
+        """Full-text search over every report and notebook this box holds (kept copies and live runs). Entries that
+        live only in GitHub are matched on their title, question and summary. Each hit carries a short snippet."""
+        words = [w for w in re.findall(r"\w{2,}", (q or "").lower())][:8]
+        if not words:
+            return {"q": q, "hits": []}
+        rows = self.list()["entries"]
+        roots = {}
+        if self.hub.research.available():
+            for r in rows:
+                if r.get("live_mission"):
+                    roots[r["lid"]] = os.path.join(self.hub.research.repo, "missions", r["live_mission"])
+        hits = []
+        for r in rows:
+            texts = []
+            d = os.path.join(self.dir, r["lid"])
+            for name in ("report.md", "notebook.md"):
+                texts.append(_read(os.path.join(d, name), 400000))
+            if r["lid"] in roots and not any(texts):
+                for name in ("REPORT.md", "NOTEBOOK.md"):
+                    texts.append(_read(os.path.join(roots[r["lid"]], name), 400000))
+            head = " ".join(str(r.get(k) or "") for k in ("title", "question", "one_line"))
+            body = "\n".join(t for t in texts if t)
+            low_head, low = head.lower(), body.lower()
+            if not all(w in low_head or w in low for w in words):
+                continue
+            score = sum(5 * low_head.count(w) + min(low.count(w), 30) for w in words)
+            i = min((low.find(w) for w in words if w in low), default=-1)
+            snip = ""
+            if i >= 0:
+                a = max(0, body.rfind("\n", 0, i) + 1 if i - body.rfind("\n", 0, i) < 160 else i - 120)
+                snip = " ".join(re.sub(r"[#*_>|`\[\]]", " ", body[a:a + 260]).split())
+            hits.append({"lid": r["lid"], "live_mission": r.get("live_mission"), "title": r.get("title"), "snippet": snip,
+                         "score": score, "in_github": r.get("in_github"), "started": r.get("started")})
+        hits.sort(key=lambda h: -h["score"])
+        return {"q": q, "hits": hits[:limit]}
+
     # ------------------------------------------------------------ read
 
     def html(self, lid: str) -> str:
@@ -255,10 +294,14 @@ def add_routes(router, hub_of, body_of) -> None:
     async def post_save(request):
         return web.json_response(await asyncio.to_thread(lib(request).save, await body_of(request)))
 
+    async def get_search(request):
+        return web.json_response(await asyncio.to_thread(lib(request).search, request.query.get("q", "")))
+
     async def get_html(request):
         text = await asyncio.to_thread(lib(request).html, request.match_info["lid"])
         return web.Response(text=text, content_type="text/html", headers={"Cache-Control": "no-store"})
 
     router.add_get("/api/library", get_list)
+    router.add_get("/api/library/search", get_search)
     router.add_post("/api/library/save", post_save)
     router.add_get("/api/library/{lid}/html", get_html)

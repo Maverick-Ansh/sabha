@@ -2,7 +2,7 @@
 // per agent (now doing, summary, cards, instructions, clear context, pause), and a new-mission composer.
 // Data comes from GET /api/research every 3 s; commands go to POST /api/research/command (PROTOCOL section 8).
 import { h, icon, setText, clear, autogrow } from './dom.js';
-import { get, post, del, enc } from './api.js';
+import { get, post, del, enc, getToken } from './api.js';
 import { fmtAgo, fmtDur, fmtClock, serverNow } from './format.js';
 import { renderInto } from './md.js';
 import { toast } from './notify.js';
@@ -10,6 +10,7 @@ import { createTaste } from './taste.js';
 import { openReport } from './report.js';
 import { createTimeDial } from './timedial.js';
 import { createLibrary } from './library.js';
+import { createSidebar } from './rsidebar.js';
 
 const POLL_MS = 3000;
 const SHEET_MS = 4000;
@@ -97,7 +98,7 @@ export function createResearch() {
   const newBtn = h('button.btn.brand', { onclick: () => openMission() }, icon('plus', 15), 'New mission');
   // A run started from the app: the next one starts from the taste form, which this button brings into view
   const startBtn = h('button.btn.r-start', { hidden: true, title: 'Ask a new question: the agents plan, read and write a new report', onclick: () => { setTab('now'); taste.focusForm(); } },
-    h('span.r-start-plus', { 'aria-hidden': 'true' }, icon('plus', 14)), 'New research');
+'New research');
   const actions = h('div.r-actions', null,
     startBtn, reportBtn, notebookBtn, newBtn, knowBtn,
     h('button.btn', { onclick: () => openDoc('Status', 'status') }, icon('log', 15), 'Status'),
@@ -131,32 +132,49 @@ export function createResearch() {
     waveNow, waveBar, waveSub, waveList);
   const bodyEl = h('div.r-body', null, banner, waveCard, grid, h('div.r-lower', null, allCard, cmdCard, feedCard));
   const taste = createTaste({ onChange: () => setTimeout(tick, 400) });
-  // ---------- tabs: this research, and the library of every research ----------
-  const library = createLibrary({ onOpen: (e) => openFromLibrary(e) });
+  // ---------- the sidebar (every research, search) and the panes it switches: this research, the library, a kept page ----------
+  const library = createLibrary({ onOpen: (e) => openFromLibrary(e, true) });
+  const side = createSidebar({
+    onNew: () => { setTab('now'); taste.focusForm(); },
+    onOpen: (e) => openFromLibrary(e, false),
+    onBrowse: () => setTab('library'),
+    activeId: () => (tab === 'now' && data && data.mission ? data.mission.id : ''),
+  });
   let tab = 'now';
-  const libCount = h('span.r-tab-n');
-  const tabBtns = [['now', 'Research', null], ['library', 'Library', libCount]].map(([k, label, extra]) =>
-    h('button', { role: 'tab', 'aria-selected': String(k === tab), 'data-tab': k, onclick: () => setTab(k) }, label, extra));
-  const tabsEl = h('div.r-tabs', { role: 'tablist', 'aria-label': 'Research' }, tabsElHl(), tabBtns);
-  function tabsElHl() { return h('span.r-tabs-hl', { 'aria-hidden': 'true' }); }
   const nowEl = h('div.r-now-pane', null, hero, taste.el, bodyEl, empty);
   const libEl = h('div.r-lib-pane', { hidden: true }, library.el);
+  const pageTitle = h('div.r-page-title.ellipsis');
+  const pageOpen = h('a.btn.sm', { target: '_blank', rel: 'noopener' }, 'Open in a new tab');
+  const pageFrame = h('iframe.r-page-frame', { title: 'A report from your library', loading: 'lazy' });
+  const pageEl = h('div.r-page-pane', { hidden: true },
+    h('div.r-page-head', null, h('span.r-page-tag', null, 'From your library'), pageTitle, h('span.spacer'), pageOpen), pageFrame);
   function setTab(k) {
     tab = k;
-    tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
-    tabsEl.dataset.on = k;
-    nowEl.hidden = k !== 'now'; libEl.hidden = k !== 'library';
+    nowEl.hidden = k !== 'now'; libEl.hidden = k !== 'library'; pageEl.hidden = k !== 'page';
+    el.classList.toggle('page-mode', k === 'page');
     if (k === 'library') library.load();
+    side.paint();
   }
-  async function openFromLibrary(e) {
+  // A run on this box shows in the Research pane (from a library cover, its report opens too); a report kept only in
+  // GitHub (an earlier box) opens as its saved page right here.
+  async function openFromLibrary(e, withReport) {
+    if (!e.live_mission) {
+      const url = `/api/library/${enc(e.lid)}/html?token=${enc(getToken() || '')}`;
+      setText(pageTitle, e.title || e.lid);
+      pageOpen.href = url;
+      if (pageFrame.getAttribute('src') !== url) pageFrame.src = url;
+      setTab('page');
+      return;
+    }
     setTab('now');
     wanted = e.live_mission; missionSel.value = e.live_mission;
     while (busy) await new Promise((r) => setTimeout(r, 120));  // a poll in flight would swallow this tick
     await tick();
-    if (data && data.mission && data.mission.id === e.live_mission && data.mission.has_report) reader('report');
+    scrollEl.scrollTop = 0;
+    if (withReport && data && data.mission && data.mission.id === e.live_mission && data.mission.has_report) reader('report');
   }
-  const el = h('div.view.research', { 'data-view': 'research' }, h('div.r-scroll.scroll', null, h('div.r-col', null, tabsEl, nowEl, libEl)));
-  tabsEl.dataset.on = 'now';
+  const scrollEl = h('div.r-scroll.scroll', null, h('div.r-col', null, h('div.r-colbar', null, side.toggle), nowEl, libEl, pageEl));
+  const el = h('div.view.research', { 'data-view': 'research' }, h('div.r-shell', null, side.el, scrollEl), side.scrim);
   allIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendAll(); } });
 
   // ---------- tiles ----------
@@ -199,7 +217,8 @@ export function createResearch() {
     const d = data;
     if (!d) return;
     taste.update(d);
-    setText(libCount, String((d.missions || []).length || ''));
+    const msig2 = sig((d.missions || []).map((x) => [x.id, x.status])) + (d.mission ? d.mission.has_final : '');
+    if (side.sig !== msig2) { side.sig = msig2; side.load(); } else side.paint();
     const m = d.mission;
     bodyEl.hidden = !m; hero.classList.toggle('bare', !m);
     stats.hidden = !m; rawEl.hidden = !m; pulseEl.hidden = !m;
@@ -696,7 +715,7 @@ export function createResearch() {
 
   return {
     el,
-    setActive(on) { active = on; if (on) start(); else { stop(); closeSheet(); } },
+    setActive(on) { active = on; if (on) { start(); side.load(); } else { stop(); closeSheet(); side.close(); } },
   };
 }
 

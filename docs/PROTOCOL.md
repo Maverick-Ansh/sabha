@@ -656,8 +656,12 @@ paper brief a model reads (the refine prompt asks it to say when a result is old
 
 ## 17. The research library (`sabha/library.py`, `web/js/library.js`)
 
-The Research view has two tabs: **Research** (the run on screen, with a **New research** button that opens the
-question form whenever no run is going) and **Library** (every research, newest first, as covers).
+The Research view has a sidebar, like a chat app's: **New research** (opens the question form), a search box, and
+every research grouped by when it ran (Running, Today, Yesterday, Previous 7 days, Previous 30 days, then by month).
+Titles filter as you type; after a short pause `GET /api/library/search?q=` searches the full text of every report
+and notebook on the box and the matches come back with a snippet. Picking a run on this box shows it in the main
+pane; picking a report kept only in GitHub opens its saved page right there. **Browse the library** shows the covers.
+The sidebar folds away on a wide screen (remembered) and is a drawer on a phone.
 
 A finished report is kept the moment the reader shows it: the reader posts its standalone page (the same one Save
 page downloads, which follows the viewer's light or dark preference) and the hub stores `report.html`, `report.md`,
@@ -670,6 +674,7 @@ that index, so reports from earlier boxes stay in the Library and open from GitH
 | Method & path | Body | Returns |
 |---|---|---|
 | `GET /api/library` | | `{ entries: [...], github: { on, repo, error } }` |
+| `GET /api/library/search?q=` | | `{ q, hits: [{ lid, live_mission, title, snippet, score, in_github, started }] }` (all words must match) |
 | `POST /api/library/save` | `{ mission, html }` | the entry; `pushing: true` while it goes to GitHub |
 | `GET /api/library/{lid}/html[?token=T]` | | the kept page (`text/html`); the token may ride in the link so it opens in a new tab |
 
