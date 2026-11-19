@@ -8,6 +8,7 @@ import { createTimeline } from './timeline.js';
 import { openComposerModal } from './composer.js';
 import { get } from './api.js';
 import { nav } from './nav.js';
+import { lotusGlyph } from './lotus.js';
 
 // Research runs in its own process (sabha/research/run.py), not as crew missions, so Watch polls its overview and
 // shows each research agent (one per track) in the roster and on the orbit's outer band.
@@ -65,7 +66,9 @@ export function createWatch() {
   const stats = { running: stat('Running'), steps: stat('Steps'), tools: stat('Tool calls'), tokens: stat('Tokens') };
   const focusChip = h('button.chip.focus-chip', { hidden: true, onclick: () => focus(null) });
   const empty = h('div.stage-empty', { hidden: true },
-    h('div.display.italic.empty-line', null, 'The sabha is quiet. Give it something to do.'),
+    h('div.qe-mark', { 'aria-hidden': 'true' }, lotusGlyph(28)),
+    h('div.qe-text', null, h('div.qe-title', null, 'The sabha is quiet.'),
+      h('div.qe-sub', null, 'Give an agent a task and watch it plan, search and build, right here.')),
     h('button.btn.brand', { onclick: () => openComposerModal() }, icon('plus', 15), 'Give it a task'));
   const stage = h('section.stage', null,
     h('div.orbit-wrap', null, canvas),
@@ -197,6 +200,7 @@ export function createWatch() {
     countTo(stats.tools.v, tools);
     countTo(stats.tokens.v, tok);
     empty.hidden = missions().length > 0 || !getState().ready || !!(rData && rData.run && rData.run.running);
+    stage.classList.toggle('quiet', !empty.hidden);  // the empty card takes the place of the stats (all zero then)
   }
   function renderFocus() {
     const { focusAgent: f, focusMission: fm } = getState().ui;

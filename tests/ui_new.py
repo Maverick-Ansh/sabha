@@ -39,6 +39,13 @@ async def main(a):
                     await loc.click(timeout=4000)
                     await page.wait_for_timeout(1200)
 
+                if a.only == "quiet":  # Watch with nothing running, and the agent chips (Council picks them)
+                    for name, route in (("watch", "#/watch"), ("council", "#/council")):
+                        await page.goto(a.base + route + tok)
+                        await page.wait_for_timeout(6000)
+                        await snap(name)
+                    await ctx.close()
+                    continue
                 if a.only == "nirmana":  # the workshop: instruments, the load sheet, a flow run live and finished
                     try:
                         await page.goto(a.base + "#/nirmana" + tok)

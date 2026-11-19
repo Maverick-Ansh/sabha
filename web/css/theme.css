@@ -199,3 +199,26 @@ a { color: var(--lilac-deep); }
 @media (prefers-reduced-motion: reduce) {
   .wash, .mist { translate: none; }
 }
+
+/* ---- Watch, nothing running: a frosted card where the (all-zero) stats sit, clear of the orbit's rings ---- */
+.stage-empty { left: 0; right: 0; bottom: 22px; margin: 0 auto; transform: none; width: min(calc(100% - 32px), 580px);
+  flex-direction: row; align-items: center; gap: 16px; text-align: left; padding: 14px 14px 14px 16px; border-radius: 24px;
+  background: rgba(var(--glass-rgb), .74); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4); }
+.qe-mark { flex: none; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle, rgba(var(--core-a-rgb), .24), rgba(var(--core-b-rgb), .06) 62%, transparent 72%);
+  animation: qe-breathe 3.4s var(--ease) infinite; }
+.qe-text { flex: 1; min-width: 0; }
+.qe-title { font: 600 17px/1.25 var(--f-ui); letter-spacing: -.015em; color: var(--ink); }
+.qe-sub { margin-top: 3px; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
+.stage-empty .btn { flex: none; }
+.stage-stats { transition: opacity var(--t) var(--ease); }
+.stage.quiet .stage-stats { opacity: 0; visibility: hidden; }
+@keyframes qe-breathe { 50% { transform: scale(1.07); filter: brightness(1.15); } }
+@media (max-width: 560px) {
+  .stage-empty { flex-direction: column; text-align: center; gap: 10px; padding: 18px 18px 16px; bottom: 16px; }
+}
+
+/* ---- dark mode: nothing selected may sit on pure white (the text there is light) ---- */
+.agent-chip.on { background: linear-gradient(rgba(var(--hue-rgb), .16), rgba(var(--hue-rgb), .16)), rgba(var(--glass-rgb), .94); color: var(--ink); }
+kbd { background: rgba(var(--glass-rgb), .9); }
