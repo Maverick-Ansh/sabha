@@ -1,28 +1,24 @@
-// Resizable panels in Watch: drag the Everyone stream's left edge to make it wider or narrower, drag the timeline's
-// top edge to make it taller or shorter. Double-click a handle (or drag it nearly shut) to fold the panel away; a
-// small tab brings the stream back, the timeline folds to a thin bar. Sizes are remembered per browser. Arrow keys
-// move a focused handle. Only on a wide screen: a phone keeps its stacked layout.
+// The resizable Everyone stream in Watch: drag its left edge to make it wider or narrower; double-click the handle
+// (or drag it nearly shut) to fold it away, and a small tab brings it back. The width is remembered per browser.
+// Arrow keys move a focused handle. Only on a wide screen: a phone keeps its stacked layout. (The timeline keeps its
+// fixed height at the bottom.)
 import { h } from './dom.js';
 
 const KEY = 'sabha.watch.sizes';
 const wide = () => matchMedia('(min-width: 1041px)').matches;
 
-export function makeResizable(view, streamPanel, tlPanel) {
-  let s = { sw: 420, th: 112, sFold: false, tFold: false };
+export function makeResizable(view, streamPanel) {
+  let s = { sw: 420, sFold: false };
   try { s = { ...s, ...(JSON.parse(localStorage.getItem(KEY) || '{}') || {}) }; } catch { /* private window */ }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* fine */ } };
 
   function apply() {
-    if (!wide()) { view.style.removeProperty('--stream-w'); view.style.removeProperty('--timeline-h'); view.classList.remove('stream-folded', 'tl-folded'); return; }
+    if (!wide()) { view.style.removeProperty('--stream-w'); view.style.removeProperty('--timeline-h'); view.classList.remove('stream-folded'); return; }
     view.style.setProperty('--stream-w', s.sFold ? '0px' : `${Math.round(s.sw)}px`);
-    view.style.setProperty('--timeline-h', s.tFold ? '30px' : `${Math.round(s.th)}px`);
     view.classList.toggle('stream-folded', s.sFold);
-    view.classList.toggle('tl-folded', s.tFold);
     sx.setAttribute('aria-valuenow', String(Math.round(s.sw)));
-    ty.setAttribute('aria-valuenow', String(Math.round(s.th)));
   }
   const maxW = () => Math.max(300, Math.min(960, view.clientWidth * 0.62));
-  const maxH = () => Math.max(120, Math.min(560, view.clientHeight * 0.6));
 
   function drag(handle, onMove) {
     handle.addEventListener('pointerdown', (e) => {
@@ -63,23 +59,6 @@ export function makeResizable(view, streamPanel, tlPanel) {
     h('span', null, 'Everyone'));
   streamPanel.prepend(sx);
   view.appendChild(reopen);
-
-  // the timeline: its top edge
-  const ty = h('div.rz.rz-y', { role: 'separator', tabindex: '0', 'aria-orientation': 'horizontal', 'aria-label': 'Resize the timeline',
-    'aria-valuemin': '30', title: 'Drag to resize · double-click to fold' }, h('i'));
-  drag(ty, (e) => {
-    const hh = view.getBoundingClientRect().bottom - e.clientY;
-    if (hh < 54) { s.tFold = true; return; }
-    s.tFold = false; s.th = Math.min(maxH(), Math.max(70, hh));
-  });
-  ty.addEventListener('dblclick', () => { s.tFold = !s.tFold; apply(); save(); });
-  ty.addEventListener('keydown', (e) => {
-    const d = e.key === 'ArrowUp' ? 20 : e.key === 'ArrowDown' ? -20 : 0;
-    if (e.key === 'Enter') { s.tFold = !s.tFold; apply(); save(); return; }
-    if (!d) return;
-    e.preventDefault(); s.tFold = false; s.th = Math.min(maxH(), Math.max(70, s.th + d)); apply(); save();
-  });
-  tlPanel.prepend(ty);
 
   addEventListener('resize', apply);
   apply();

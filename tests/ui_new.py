@@ -57,12 +57,6 @@ async def main(a):
                             await page.mouse.down()
                             await page.mouse.move(bx["x"] - 220, bx["y"] + bx["height"] / 2, steps=8)
                             await page.mouse.up()
-                            hy = page.locator(".rz-y").first
-                            bx = await hy.bounding_box()
-                            await page.mouse.move(bx["x"] + bx["width"] / 2, bx["y"] + 5)
-                            await page.mouse.down()
-                            await page.mouse.move(bx["x"] + bx["width"] / 2, bx["y"] - 120, steps=8)
-                            await page.mouse.up()
                             await page.wait_for_timeout(800)
                             await snap("pf_watch_wide")
                             await hx.dblclick()

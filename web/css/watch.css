@@ -178,17 +178,15 @@
 
 /* resizable stream and timeline (resize.js) */
 .watch { position: relative; }
-.stream-panel, .tl-panel { position: relative; }
+.stream-panel { position: relative; }
 .rz { position: absolute; z-index: 6; touch-action: none; display: grid; place-items: center; }
 .rz i { display: block; border-radius: 4px; background: rgba(var(--ink-rgb), .22); opacity: 0; transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease); }
 .rz-x { top: 0; bottom: 0; left: -5px; width: 10px; cursor: col-resize; }
 .rz-x i { width: 4px; height: 44px; }
-.rz-y { left: 0; right: 0; top: -5px; height: 10px; cursor: row-resize; }
-.rz-y i { width: 44px; height: 4px; }
 .rz:hover i, .rz:focus-visible i, .watch.resizing .rz i { opacity: 1; background: var(--core-a); }
 .rz:focus-visible { outline: none; }
 .watch.resizing { user-select: none; cursor: inherit; }
-.watch.resizing .stage, .watch.resizing .stream, .watch.resizing .tl-panel > :not(.rz) { pointer-events: none; }
+.watch.resizing .stage, .watch.resizing .stream { pointer-events: none; }
 .watch.stream-folded .stream-panel { border-left: 0; overflow: hidden; }
 .watch.stream-folded .stream-panel .rz-x { left: -10px; }
 .rz-tab { display: none; }
@@ -197,5 +195,4 @@
   cursor: pointer; font: 600 12px var(--f-ui); box-shadow: var(--shadow-sm); }
 .watch.stream-folded .rz-tab span { writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: .04em; }
 .watch.stream-folded .rz-tab:hover { color: var(--ink); background: rgba(var(--glass-rgb), .98); }
-.watch.tl-folded .tl-panel > :not(.rz) { opacity: .35; }
 @media (max-width: 1040px) { .rz, .rz-tab { display: none !important; } }

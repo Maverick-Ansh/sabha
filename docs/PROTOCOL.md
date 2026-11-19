@@ -701,5 +701,5 @@ Notebook secrets with the same names (`SABHA_GIT_REPO`, `SABHA_GIT_TOKEN`, `TAVI
 (this box, then GitHub), else Sabha's preset (Qwen3.5 9B AWQ as deep, Qwen3.5 4B as reader on 2x T4).
 
 New research empties the question field (the taste and loved papers stay). In Watch, the Everyone stream's left edge
-and the timeline's top edge drag to resize; a double-click folds either away (a tab brings the stream back); sizes
-are kept per browser (`sabha.watch.sizes`).
+drags to resize and a double-click folds it away (a tab brings it back); the width is kept per browser
+(`sabha.watch.sizes`). The timeline keeps its fixed height at the bottom.

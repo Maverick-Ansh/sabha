@@ -83,7 +83,7 @@ export function createWatch() {
   const streamPanel = h('section.stream-panel', null, stream.el);
   const tlPanel = h('section.tl-panel', null, timeline.el);
   const el = h('div.view.watch', { 'data-view': 'watch' }, roster, stage, streamPanel, tlPanel);
-  makeResizable(el, streamPanel, tlPanel);
+  makeResizable(el, streamPanel);
 
   const orbit = createOrbit(canvas, { onFocus: (id) => focus(id), onResearch: () => nav.go('research') });
 
