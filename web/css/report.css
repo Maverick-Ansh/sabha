@@ -199,7 +199,7 @@ html.rp-open { overflow: hidden; }
 .rp-card-md { font-size: 14.5px; line-height: 1.62; }
 
 /* ---------- phone ---------- */
-@media (max-width: 859px) {
+@media screen and (max-width: 859px) {
   .rp-bar { gap: 6px; padding: 0 8px; height: 54px; }
   .rp-bar-title { display: none; }
   .rp-tabs { flex: 1; justify-content: center; }
@@ -225,19 +225,6 @@ html.rp-open { overflow: hidden; }
   .rp-md td:first-child { min-width: 140px; }
   .rp-grid { grid-template-columns: 1fr; }
   .rp-peek.wide { left: 0 !important; right: 0; top: 8vh !important; bottom: 0; width: auto; border-radius: 24px 24px 0 0; }
-}
-
-/* ---------- print: the document only ---------- */
-@media print {
-  html.rp-printing body > *:not(.rp) { display: none !important; }
-  html.rp-printing .rp { position: static; transform: none; opacity: 1; background: #fff; color: #111; }
-  html.rp-printing .rp::before, html.rp-printing .rp-bar, html.rp-printing .rp-toc, html.rp-printing .rp-peek, html.rp-printing .rp-q-more { display: none !important; }
-  html.rp-printing .rp-scroll { overflow: visible; }
-  html.rp-printing .rp-layout { display: block; }
-  html.rp-printing .rp-title { -webkit-text-fill-color: #111; color: #111; background: none; }
-  html.rp-printing .rp-q-md { max-height: none; -webkit-mask-image: none; mask-image: none; }
-  html.rp-printing .rp-exp, html.rp-printing .rp-paper, html.rp-printing .rp-entry { break-inside: avoid; box-shadow: none; }
-  html.rp-printing .rp-cite { border: 0; background: none; padding: 0; color: #333; }
 }
 
 /* ================= the run-length dial ================= */

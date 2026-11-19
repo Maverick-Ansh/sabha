@@ -64,6 +64,22 @@ async def main(a):
                         await page.locator(".r-actions .btn.brand").first.click(timeout=4000)
                         await page.wait_for_timeout(3500)
                         await snap("rp_top")
+                        if sz == "d":  # Save page: one .html that looks like the reader; its print is the PDF, every page
+                            async with page.expect_download() as dl:
+                                await page.locator('.rp-bar-act button[title^="Save the page"]').click(timeout=3000)
+                            d = await dl.value
+                            hp = os.path.abspath(os.path.join(a.out, f"{a.tag}_{theme}_{sz}_page.html"))
+                            await d.save_as(hp)
+                            p2 = await ctx.new_page()
+                            await p2.goto("file://" + hp)
+                            await p2.wait_for_timeout(2000)
+                            await p2.screenshot(path=os.path.join(a.out, f"{a.tag}_{theme}_{sz}_page.jpg"), type="jpeg", quality=70)
+                            pdf = os.path.join(a.out, f"{a.tag}_{theme}_{sz}_report.pdf")
+                            await p2.pdf(path=pdf, print_background=True, prefer_css_page_size=True)
+                            raw = open(pdf, "rb").read()
+                            print(f"PAGE {theme}: html {os.path.getsize(hp) // 1024} KB, pdf {len(raw) // 1024} KB, "
+                                  f"{raw.count(b'/Type /Page') - raw.count(b'/Type /Pages')} pages", flush=True)
+                            await p2.close()
                         cite = page.locator(".rp-cite[data-aid]").first
                         if await cite.count():
                             await cite.scroll_into_view_if_needed()

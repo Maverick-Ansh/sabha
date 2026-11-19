@@ -39,6 +39,34 @@ const SECTION_KIND = [
   [/^the papers/i, 'dossier'], [/^wave log/i, 'waves'], [/^from the lab notebook/i, 'notes'], [/^synthesis/i, 'synth'],
 ];
 
+// Added to the inlined app styles in a saved page or a PDF: the document scrolls like a page, prints on every page.
+const STANDALONE_CSS = `
+html, body { height: auto !important; overflow: visible !important; }
+body.rp-standalone { background: var(--paper); color: var(--ink); }
+.rp-standalone .rp { position: relative !important; inset: auto !important; opacity: 1 !important; transform: none !important; display: block !important; min-height: 100vh; z-index: auto; }
+.rp-standalone .rp-scroll { overflow: visible !important; }
+.rp-standalone .rp-article, .rp-standalone .rp-tile { animation: none !important; }
+.rp-standalone a.rp-cite { text-decoration: none; }
+.rp-standalone .rp-tile { cursor: default; }
+.rp-saved { margin: 28px 0 0; font-size: 12px; color: var(--ink-3); }
+html { scroll-behavior: smooth; }
+@media print {
+  @page { size: A4; margin: 14mm 0; }
+  html, body { background: var(--paper) !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; animation: none !important; }
+  .rp-toc { display: none !important; }
+  .rp-layout { display: block !important; }
+  .rp-wrap { padding: 0 16mm !important; max-width: none !important; }
+  .rp-article { padding-top: 0 !important; }
+  .rp::before { height: 260px; }
+  .rp-md.nb .rp-sec > h2 { position: static !important; }
+  .rp-ptools { position: static !important; }
+  .rp-tablewrap { overflow: visible !important; }
+  .rp-finding, .rp-exp, .rp-entry, .rp-tile, .rp-wave-d, .rp-conf, .rp-q, .rp-md blockquote, .rp-md tr, .rp-best { break-inside: avoid; }
+  .rp-md h2, .rp-md h3, .rp-md h4 { break-after: avoid; }
+  .rp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}`;
+
 let current = null;
 export function closeReport() { if (current) current.close(); }
 
@@ -56,10 +84,11 @@ export function openReport(opts = {}) {
   const tabs = h('div.rp-tabs', { role: 'tablist', 'aria-label': 'Report parts' }, tabBtns);
   const refineBtn = h('button.btn.sm.rp-refine', { hidden: true, onclick: () => refine() }, icon('spark', 14), h('span', null, 'Refine'));
   const dlBtn = h('button.btn.sm.ghost', { title: 'Download this page as markdown', onclick: () => download() }, icon('down', 14), h('span.rp-hide-s', null, '.md'));
-  const printBtn = h('button.btn.sm.ghost', { title: 'Print, or save as PDF', onclick: () => print() }, icon('file', 14), h('span.rp-hide-s', null, 'PDF'));
+  const pageBtn = h('button.btn.sm.ghost', { title: 'Save the page as one .html file that looks exactly like this (opens in any browser, offline)', onclick: () => savePage() }, icon('layers', 14), h('span.rp-hide-s', null, 'Page'));
+  const printBtn = h('button.btn.sm.ghost', { title: 'Save as PDF: every page, in this look (choose "Save as PDF" in the print dialog)', onclick: () => print() }, icon('file', 14), h('span.rp-hide-s', null, 'PDF'));
   const closeBtn = h('button.btn.ghost.icon', { title: 'Close (Esc)', 'aria-label': 'Close the report', onclick: () => api.close() }, icon('x', 18));
   const barTitle = h('div.rp-bar-title.ellipsis');
-  const bar = h('header.rp-bar', null, closeBtn, barTitle, tabs, h('div.rp-bar-act', null, refineBtn, dlBtn, printBtn));
+  const bar = h('header.rp-bar', null, closeBtn, barTitle, tabs, h('div.rp-bar-act', null, refineBtn, dlBtn, pageBtn, printBtn));
   const scroll = h('div.rp-scroll');
   const peekEl = h('div.rp-peek', { hidden: true, role: 'dialog', 'aria-label': 'Paper' });
   const root = h('div.rp', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Research report' }, bar, scroll, peekEl);
@@ -398,13 +427,71 @@ export function openReport(opts = {}) {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   }
+  // The page as one self-contained document: the reader's DOM as it is now, every stylesheet of the app inlined,
+  // the current theme. Citation chips become arXiv links, the question and the wave chapters are open. Used for the
+  // .html download and for the PDF (the app itself is a fixed-height screen, so printing it gave one page).
+  function standalone() {
+    const wrap = scroll.querySelector('.rp-wrap');
+    if (!wrap) return null;
+    const clone = wrap.cloneNode(true);
+    for (const d of clone.querySelectorAll('details')) d.setAttribute('open', '');
+    for (const q of clone.querySelectorAll('.rp-q')) q.classList.add('open');
+    for (const b of clone.querySelectorAll('.rp-q-more, .rp-skel')) b.remove();
+    for (const a of clone.querySelectorAll('.rp-toc-a.on')) a.classList.remove('on');
+    for (const b of clone.querySelectorAll('button.rp-cite[data-aid]')) {
+      const a = document.createElement('a');
+      a.className = b.className; a.href = 'https://arxiv.org/abs/' + b.dataset.aid; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.title = b.title; if (b.dataset.hue) a.dataset.hue = b.dataset.hue;
+      a.textContent = b.textContent; b.replaceWith(a);
+    }
+    for (const b of clone.querySelectorAll('button.rp-tile')) {
+      const d = document.createElement('div');
+      d.className = b.className; if (b.dataset.hue) d.dataset.hue = b.dataset.hue;
+      while (b.firstChild) d.appendChild(b.firstChild);
+      b.replaceWith(d);
+    }
+    let css = '';
+    for (const sh of Array.from(document.styleSheets)) {
+      try { css += Array.from(sh.cssRules).map((r) => r.cssText).join('\n') + '\n'; } catch { /* a cross-origin sheet (fonts): linked below */ }
+    }
+    const title = (barTitle.textContent || 'Sabha report').trim();
+    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    const saved = `Saved from Sabha on ${new Date().toLocaleString()}. Citations link to arXiv.`;
+    const html = '<!doctype html><html lang="en" data-theme="' + theme + '"><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="' + theme + '">'
+      + '<title>' + esc(title) + '</title>'
+      + '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..700&family=Geist+Mono:wght@400;500&display=swap">'
+      + '<style>' + css + '\n' + STANDALONE_CSS + '</style></head><body class="rp-standalone"><div class="rp open"><div class="rp-scroll">'
+      + clone.outerHTML.replace('</article>', '<p class="rp-saved">' + esc(saved) + '</p></article>')
+      + '</div></div></body></html>';
+    return { html, title };
+  }
+  const fileName = (title, ext) => (title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'sabha-report') + ext;
+  function savePage() {
+    const d = standalone();
+    if (!d) { toast('Nothing to save yet', { tone: 'sun' }); return; }
+    const url = URL.createObjectURL(new Blob([d.html], { type: 'text/html' }));
+    const a = h('a', { href: url, download: fileName(d.title, '.html') });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('Page saved', { sub: 'One .html file: open it in any browser, it looks like this and works offline (fonts need the web).', tone: 'mint', timeout: 5000 });
+  }
   function print() {
-    for (const d of scroll.querySelectorAll('details')) d.open = true;
-    document.documentElement.classList.add('rp-printing');
-    const done = () => { document.documentElement.classList.remove('rp-printing'); removeEventListener('afterprint', done); };
-    addEventListener('afterprint', done);
-    window.print();
-    setTimeout(done, 1500);
+    const d = standalone();
+    if (!d) { toast('Nothing to print yet', { tone: 'sun' }); return; }
+    const f = h('iframe', { 'aria-hidden': 'true', tabindex: '-1', style: 'position:fixed;left:-12000px;top:0;width:1000px;height:800px;border:0;' });
+    document.body.appendChild(f);
+    f.onload = async () => {
+      const w = f.contentWindow;
+      try { await Promise.race([w.document.fonts.ready, new Promise((r) => setTimeout(r, 2500))]); } catch { /* print anyway */ }
+      setTimeout(() => {
+        const t = document.title;
+        document.title = d.title;  // the PDF's suggested file name
+        try { w.focus(); w.print(); } finally { document.title = t; setTimeout(() => f.remove(), 60000); }
+      }, 250);
+    };
+    f.srcdoc = d.html;
   }
   function paintRefine() {
     const o = ov();
