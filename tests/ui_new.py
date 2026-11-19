@@ -46,6 +46,47 @@ async def main(a):
                         await snap(name)
                     await ctx.close()
                     continue
+                if a.only == "profile":  # resizable Watch panels, the profile, Nirmana's default, New research empties the question
+                    try:
+                        await page.goto(a.base + "#/watch" + tok)
+                        await page.wait_for_timeout(4500)
+                        if sz == "d":
+                            hx = page.locator(".rz-x").first
+                            b = await hx.bounding_box()
+                            await page.mouse.move(b["x"] + 5, b["y"] + b["height"] / 2)
+                            await page.mouse.down()
+                            await page.mouse.move(b["x"] - 220, b["y"] + b["height"] / 2, steps=8)
+                            await page.mouse.up()
+                            hy = page.locator(".rz-y").first
+                            b = await hy.bounding_box()
+                            await page.mouse.move(b["x"] + b["width"] / 2, b["y"] + 5)
+                            await page.mouse.down()
+                            await page.mouse.move(b["x"] + b["width"] / 2, b["y"] - 120, steps=8)
+                            await page.mouse.up()
+                            await page.wait_for_timeout(800)
+                            await snap("pf_watch_wide")
+                            await hx.dblclick()
+                            await page.wait_for_timeout(800)
+                            await snap("pf_watch_folded")
+                            await page.locator(".rz-tab").click(timeout=3000)
+                            await page.wait_for_timeout(500)
+                        await page.locator(".me-btn").click(timeout=4000)
+                        await page.wait_for_timeout(2500)
+                        await snap("pf_profile")
+                        await page.keyboard.press("Escape")
+                        await page.wait_for_timeout(500)
+                        await page.goto(a.base + "#/nirmana" + tok)
+                        await page.wait_for_timeout(4500)
+                        await snap("pf_nirmana")
+                        await page.goto(a.base + "#/research" + tok)
+                        await page.wait_for_timeout(4000)
+                        await page.locator(".r-start").first.click(timeout=4000)
+                        await page.wait_for_timeout(1500)
+                        await snap("pf_new")
+                    except Exception as e:
+                        errors.append(f"{where}: profile: {str(e)[:200]}")
+                    await ctx.close()
+                    continue
                 if a.only == "library":  # the sidebar: every research, search inside the reports, New research, the library shelf
                     try:
                         await page.goto(a.base + "#/research" + tok)
