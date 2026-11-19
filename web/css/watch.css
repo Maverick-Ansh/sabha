@@ -177,7 +177,6 @@
 }
 
 /* resizable stream and timeline (resize.js) */
-.watch { position: relative; }
 .stream-panel { position: relative; }
 .rz { position: absolute; z-index: 6; touch-action: none; display: grid; place-items: center; }
 .rz i { display: block; border-radius: 4px; background: rgba(var(--ink-rgb), .22); opacity: 0; transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease); }
