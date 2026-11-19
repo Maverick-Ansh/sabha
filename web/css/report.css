@@ -83,7 +83,7 @@ html.rp-open { overflow: hidden; }
 .rp-md td:first-child { min-width: 180px; font-weight: 550; }
 
 /* citations */
-.rp-cite { display: inline-flex; align-items: center; gap: 4px; vertical-align: baseline; max-width: 22ch; height: 1.6em; padding: 0 8px; margin: 0 1px;
+.rp-cite { display: inline-flex; align-items: center; gap: 4px; vertical-align: baseline; max-width: 30ch; height: 1.6em; padding: 0 8px; margin: 0 1px;
   border-radius: 7px; border: 1px solid rgba(var(--hue-rgb, var(--lilac-rgb)), .3); background: rgba(var(--hue-rgb, var(--lilac-rgb)), .1);
   color: var(--hue-deep, var(--lilac-deep)); font: 600 .78em/1 var(--f-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
   transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
@@ -125,7 +125,8 @@ html.rp-open { overflow: hidden; }
 .rp-exp { border-top: 3px solid rgba(var(--mint-rgb), .55); }
 .rp-exp ul { list-style: none; padding: 0; }
 .rp-exp li { padding: 4px 0; }
-.rp-exp li strong:first-child { display: inline-block; min-width: 9.5em; color: var(--mint-deep); font-size: 13px; letter-spacing: .02em; text-transform: uppercase; }
+.rp-exp li > strong:first-child, .rp-exp p > strong:first-child { color: var(--mint-deep); font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; margin-right: 2px; }
+.rp-exp ul ul { padding-left: 14px; border-left: 2px solid rgba(var(--mint-rgb), .25); margin: 4px 0 6px 2px; }
 .rp-paper { padding: 20px 22px 16px; }
 .rp-paper::before { content: ""; position: absolute; left: 0; top: 18px; bottom: 18px; width: 3px; border-radius: 0 3px 3px 0; background: linear-gradient(var(--sky), var(--lilac)); }
 .rp-paper > p:first-of-type { font-size: 13px; color: var(--ink-3); margin-top: 0; }
@@ -221,7 +222,6 @@ html.rp-open { overflow: hidden; }
   .rp-fn { left: 14px; top: 15px; font-size: 19px; }
   .rp-sec[data-kind="findings"] > ol > li::before { left: 14px; font-size: 19px; }
   .rp-exp, .rp-paper, .rp-entry { padding: 15px 15px 11px; border-radius: 18px; }
-  .rp-exp li strong:first-child { display: block; min-width: 0; }
   .rp-md td:first-child { min-width: 140px; }
   .rp-grid { grid-template-columns: 1fr; }
   .rp-peek.wide { left: 0 !important; right: 0; top: 8vh !important; bottom: 0; width: auto; border-radius: 24px 24px 0 0; }
