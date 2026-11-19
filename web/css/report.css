@@ -299,12 +299,13 @@ html.rp-open { overflow: hidden; }
 .r-tab-n:empty { display: none; }
 .r-now-pane, .r-lib-pane { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .r-now-pane[hidden], .r-lib-pane[hidden] { display: none; }
-.r-start { position: relative; overflow: hidden; isolation: isolate; color: var(--ink); font-weight: 650; border: 1px solid transparent;
-  background: linear-gradient(rgba(var(--glass-rgb), .96), rgba(var(--glass-rgb), .96)) padding-box, var(--brand) border-box; }
-.r-start-glow { position: absolute; inset: -40%; z-index: -1; background: conic-gradient(from 0deg, transparent 0 70%, rgba(var(--core-a-rgb), .35) 85%, transparent 100%);
-  animation: r-spin 3.2s linear infinite; opacity: .8; }
-.r-start:hover { box-shadow: 0 10px 30px -12px rgba(var(--core-a-rgb), .7); }
-@keyframes r-spin { to { transform: rotate(360deg); } }
+.r-start { gap: 9px; padding: 0 18px 0 7px; color: var(--ink); font-weight: 600; background: rgba(var(--core-a-rgb), .1);
+  border: 1px solid rgba(var(--core-a-rgb), .32); transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), transform var(--t) var(--spring); }
+.r-start-plus { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--brand);
+  box-shadow: 0 4px 12px -4px rgba(var(--core-a-rgb), .7); transition: transform var(--t) var(--spring); }
+.r-start:hover { background: rgba(var(--core-a-rgb), .16); border-color: rgba(var(--core-a-rgb), .5); transform: translateY(-1px); box-shadow: none; }
+.r-start:hover .r-start-plus { transform: rotate(90deg); }
+.r-start:active { transform: translateY(0); }
 .t-card.t-glow { animation: t-glow 1.6s var(--ease) 1; }
 @keyframes t-glow { 0% { box-shadow: 0 0 0 0 rgba(var(--core-a-rgb), .55); } 40% { box-shadow: 0 0 0 10px rgba(var(--core-a-rgb), .18); } 100% { box-shadow: 0 0 0 0 rgba(var(--core-a-rgb), 0); } }
 .rp-kept { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; margin-right: 4px; border-radius: var(--r-pill);
@@ -355,4 +356,4 @@ html.rp-open { overflow: hidden; }
   .r-tabs { align-self: stretch; }
   .r-tabs button { flex: 1; justify-content: center; }
 }
-@media (prefers-reduced-motion: reduce) { .r-start-glow, .lb-card { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .lb-card { animation: none; } .r-start, .r-start-plus { transition: none; } }

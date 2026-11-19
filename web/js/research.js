@@ -97,7 +97,7 @@ export function createResearch() {
   const newBtn = h('button.btn.brand', { onclick: () => openMission() }, icon('plus', 15), 'New mission');
   // A run started from the app: the next one starts from the taste form, which this button brings into view
   const startBtn = h('button.btn.r-start', { hidden: true, title: 'Ask a new question: the agents plan, read and write a new report', onclick: () => { setTab('now'); taste.focusForm(); } },
-    h('span.r-start-glow', { 'aria-hidden': 'true' }), icon('plus', 15), 'New research');
+    h('span.r-start-plus', { 'aria-hidden': 'true' }, icon('plus', 14)), 'New research');
   const actions = h('div.r-actions', null,
     startBtn, reportBtn, notebookBtn, newBtn, knowBtn,
     h('button.btn', { onclick: () => openDoc('Status', 'status') }, icon('log', 15), 'Status'),
