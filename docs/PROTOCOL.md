@@ -166,6 +166,8 @@ REST response as an ack and the event as the source of truth.
 | `POST /api/research/command` | `{ cmd, track?, text?, topic?, title?, brief?, mode?, hours? }` | `{ ok, applied_by, command?, mission, daemon_alive, note }` |
 | `GET /api/research/card/{arxiv_id}` | | `{ id, title, md, url }` one paper card as markdown |
 | `GET /api/research/doc?kind=K[&track=tid]` | | `{ kind, track, mission, md, mtime }` |
+| `GET /api/research/papers[?mission=id]` | | `{ mission, tracks: [{id,name,hue}], papers: [...] }` every card, compact (section 16) |
+| `POST /api/research/refine` | `{ mission? }` | write the finished report of an ended run (section 16); 409 while it runs or with no model |
 
 `app`: `{ name: "Sabha", version, demo: bool }`.
 `system`: `{ platform: "colab"|"kaggle"|"local", started_ts, session_limit_s, data_dir, harnesses: { dsh: bool, mock: true, chat: true }, research: bool }`.
@@ -516,7 +518,8 @@ questions and the dead ends from `knowledge.md` (≤ 1400 chars) and the long-te
 server's prefix cache within a wave.
 
 `GET /api/research` mission fields added: `has_report`, `has_knowledge`, `waves` (the object above, `{on:false}` for
-a run without waves); agent rows add `retired`, `since_wave`. Docs: `kind=living` (REPORT.md), `kind=knowledge`.
+a run without waves); agent rows add `retired`, `since_wave`. Docs: `kind=living` (REPORT.md), `kind=knowledge`, `kind=notebook`
+(NOTEBOOK.md), `kind=final` (final.md); fields `has_notebook`, `has_final`, `refining` (section 16).
 
 ## 13. Long-term memory (`sabha/research/longmem.py`)
 
@@ -603,3 +606,39 @@ A run is `{id, flow_id, flow_name, flow, input, status: running|done|failed|stop
 stages:[{id, title, kind, status: waiting|running|done|skipped|stopped, model, output, choice, why, goto, prompt, ms, ttft_ms,
 tokens_in, tokens_out, mission_id, error}]}`, kept in `<data>/nirmana/runs/` (newest 200). Events: `nirmana.run {run}` (persisted, on
 every stage change) and `nirmana.delta {run_id, stage_id, text|thinking}` (ephemeral, the streamed pieces).
+
+## 16. The lab notebook and the finished report (`sabha/research/notebook.py`)
+
+A run writes all the time, and refines at the end, so nothing the agents read is lost to a summary.
+
+- **Notebook** (`state/notebook.jsonl`, rendered to `NOTEBOOK.md`). Entries `{kind, wave, ts, ...}`: `paper` (`id`,
+  `track`, written by a reader the moment a card lands), `note` (`track`, `papers`, `text`, `idea`: after every
+  consolidation the deep model writes a lab note under 220 words, what the new papers add, with their numbers, ending
+  in one `Idea:` line), `wave` (`n`, `headline`, `cards`). A run from before the notebook gets one built from its
+  event log the first time `kind=notebook` is asked for (papers and waves only).
+- **Living report** (`REPORT.md`, rebuilt after every paper and note): the question, where we stand, the newest lab
+  notes, every wave's chapter (each ends with the papers it read and their best numbers), a synthesis draft, and a
+  table of every paper so far.
+- **Finished report** (`final.md`, then `REPORT.md` = title + question + final.md + the wave log). Written by
+  `refine()` after the final synthesis: the answer (5-8 sentences and `Confidence: high|medium|low, because ...`),
+  5-8 key findings, a comparison table, 3-5 experiments worth running (hypothesis, setup, measure, what would change
+  our mind, builds on), what is still open, how the run went, and the dossier: every paper with its architecture,
+  training, losses, results table, quotes, limitations and compute. The prose parts are separate short calls with
+  the papers first as the ground truth; the tables and the dossier come from the cards and never pass through a
+  model. A title is asked for and kept in `state/report_title.txt`.
+- Writing prompts (reports, chapters, the synthesis, the refine) use `WRITER_LESSON`, not the agents'
+  `MEMORY_LESSON` (which says only JSON survives and made small models answer markdown requests with JSON). Any JSON
+  that still comes back, fenced or bare, even cut off at the token limit, is turned into markdown (`unjson`).
+
+`GET /api/research/papers` paper rows: `{ id, title, one_line, why, tracks, hue, best, results: [{metric, value,
+setting, claim}], grade, relevance, submitted, model_type, wave, repo (verified only), method, limits, t }`, newest
+first.
+
+`POST /api/research/refine {mission}` runs backfill + refine + REPORT.md in a thread on the box's models; the
+overview's `mission.refining` is `{running, started, error, done}` until the hub restarts.
+
+The UI reads all of it in the report reader (`web/js/report.js`): Report, Notebook and Papers tabs, a contents rail
+with scroll spy, citations as chips with the paper's short name that open a peek (line, best number, limitation,
+card, arXiv, code), Download (.md) and Print (PDF). The run length is chosen on a dial (`web/js/timedial.js`): 15 min
+to 12 h on a log scale, typed values like `1h 40m` kept exact, and a strip showing the waves and when the finished
+report arrives. `taste.hours` accepts 0.25 to 12 (0 = until the session ends).

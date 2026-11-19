@@ -73,8 +73,13 @@ folds new cards into each track's claims ledger. When the wave ends, the deep mo
 4. **re-plans**: keeps, refocuses or retires each track and may open new ones for the open questions.
 
 Then every agent starts the next wave from files only, so a 12-hour run keeps every prompt the same size. The
-**living report** (`REPORT.md`, the Report button) is rebuilt from those parts: where we stand on top, one chapter
-per wave below, and the final answer at the very top when the run ends. A wave also ends early when every track has
+**living report** (`REPORT.md`, the Report button) is rebuilt from those parts and grows after every paper: where
+we stand, the newest notes from the **lab notebook** (every paper as it is read, and a note from the model after each
+batch), one chapter per wave, every paper so far. When the run ends the notebook is **refined into the finished
+report**: the answer with its confidence, the key findings with their numbers, a comparison table, experiments worth
+running, what is still open, and a dossier of every paper with its method, results and quotes. It opens in a full
+reader with contents, citation chips that open the paper, a notebook tab and a paper shelf, and downloads as
+markdown or prints to PDF. The run length is set on a dial: any length from 15 minutes to 12 hours. A wave also ends early when every track has
 run dry, so the agents never sit idle waiting for the clock.
 
 Context engineering in the prompts: the parts that do not change within a wave (the memory lesson, the mission, the
