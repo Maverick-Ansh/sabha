@@ -7,6 +7,8 @@ import { fmtAgo, fmtDur, fmtClock, serverNow } from './format.js';
 import { renderInto } from './md.js';
 import { toast } from './notify.js';
 import { createTaste } from './taste.js';
+import { openReport } from './report.js';
+import { createTimeDial } from './timedial.js';
 
 const POLL_MS = 3000;
 const SHEET_MS = 4000;
@@ -24,7 +26,10 @@ function verb(s) {
   }
   if (step === 'scouting') return s.query ? `Searching "${s.query}"` : 'Planning the next searches';
   return { consolidating: 'Updating the claims ledger', report: 'Rewriting the report', synthesis: 'Writing the synthesis',
-    seeds: 'Resolving seed papers', snowballing: 'Sorting cited papers' }[step] || step;
+    seeds: 'Resolving seed papers', snowballing: 'Sorting cited papers', notebook: 'Writing in the lab notebook',
+    'refining the report': 'Refining the finished report', 'wave chapter': 'Writing the wave\'s chapter',
+    'compacting knowledge': 'Compacting what the team knows', memory: 'Tending long-term memory',
+    'planning next wave': 'Planning the next wave' }[step] || step;
 }
 function nowLine(a, alive) {
   if (a.now && a.now.length) {
@@ -83,12 +88,14 @@ export function createResearch() {
   const stats = h('div.r-stats.card', null, stat(nCards, 'cards'), stat(nQueued, 'queued'), stat(nRate, 'per hour'), stat(nLeft, 'left'));
   const rawEl = h('button.r-raw.mono', { title: 'The daemon\'s own status line', onclick: () => rawEl.classList.toggle('open') });
   const synthBtn = h('button.btn', { hidden: true, onclick: () => openDoc('Synthesis', 'synthesis') }, icon('layers', 15), 'Synthesis');
-  const reportBtn = h('button.btn.brand', { hidden: true, title: 'Where the research stands, one chapter per wave, and the answer', onclick: () => openDoc('Report', 'living') }, icon('file', 15), 'Report');
+  const reader = (tab) => openReport({ wanted: wanted || '', overview: () => data, tab });
+  const reportBtn = h('button.btn.brand', { hidden: true, title: 'The report: the answer, key findings, experiments, every paper; the lab notebook; the paper shelf', onclick: () => reader('report') }, icon('file', 15), h('span', null, 'Report'));
+  const notebookBtn = h('button.btn', { hidden: true, title: 'Everything the agents wrote while reading, oldest first', onclick: () => reader('notebook') }, icon('pen', 15), 'Notebook');
   const knowBtn = h('button.btn', { hidden: true, title: 'The compact state of knowledge every agent reads at each step', onclick: () => openDoc('State of knowledge', 'knowledge') }, icon('layers', 15), 'What we know');
   const memBtn = h('button.btn', { title: 'What the agents keep after a run: lessons, your preferences, facts, sources', onclick: () => openMemory() }, icon('crew', 15), 'Memory');
   const newBtn = h('button.btn.brand', { onclick: () => openMission() }, icon('plus', 15), 'New mission');
   const actions = h('div.r-actions', null,
-    reportBtn, newBtn, knowBtn,
+    reportBtn, notebookBtn, newBtn, knowBtn,
     h('button.btn', { onclick: () => openDoc('Status', 'status') }, icon('log', 15), 'Status'),
     synthBtn, memBtn);
   const hero = h('header.r-hero', null,
@@ -199,12 +206,14 @@ export function createResearch() {
     if (d.workers && d.workers.total) bits.push(`${d.workers.busy} of ${d.workers.total} readers busy`);
     for (const t of d.team || []) bits.push(verb(t).toLowerCase());
     if (st.errors) bits.push(`${st.errors} errors`);
-    setText(pulseEl, alive ? bits.join(' · ') : done ? 'Finished. Read the synthesis, each agent\'s report and the cards, or download everything above.' : 'The research daemon is not reporting.');
+    setText(pulseEl, alive ? bits.join(' · ') : done ? 'Finished. Open the report: the answer, the key findings, experiments to run and every paper the agents read.' : 'The research daemon is not reporting.');
     setNum(nCards, st.cards); setNum(nQueued, st.queued); setNum(nRate, st.per_hour);
     setText(nLeft, leftText(st.left_m));
     setText(rawEl, m.status_line || 'no status line yet');
     synthBtn.hidden = !m.has_synthesis;
     reportBtn.hidden = !m.has_report;
+    setText(reportBtn.lastChild, done && m.has_final ? 'Read the report' : done ? 'Report' : 'Living report');
+    notebookBtn.hidden = !m.has_notebook;
     knowBtn.hidden = !m.has_knowledge;
     paintWaves(m.waves || {}, alive, done);
 
@@ -332,7 +341,7 @@ export function createResearch() {
     waveList.dataset.sig = sigw;
     clear(waveList);
     for (const x of (w.history || []).slice().reverse()) {
-      waveList.appendChild(h('button.w-row', { onclick: () => openDoc('Report', 'living') },
+      waveList.appendChild(h('button.w-row', { onclick: () => reader('report') },
         h('span.w-n', null, String(x.n)),
         h('div.r-row-text', null, h('div', null, x.headline || `Wave ${x.n}`),
           h('div.r-row-sub', null, `${x.cards || 0} papers · ${fmtClock(x.started, false)}–${fmtClock(x.ended, false)}`
@@ -622,7 +631,7 @@ export function createResearch() {
     const running = !!(data && data.mission && data.mission.status === 'running' && data.daemon && data.daemon.alive);
     const titleIn = h('input.input.r-input', { placeholder: 'A short name, for example: Memory in world models', 'aria-label': 'Mission title', maxlength: 80, autocomplete: 'off' });
     const briefIn = h('textarea.textarea.r-input.r-brief', { rows: 8, 'aria-label': 'Brief', placeholder: 'What do you want to find out? Plain sentences or markdown.\n\nTo set the agents yourself, add sections like\n## Agent 1: name\nwhat this agent must find out, and the papers to read first.' });
-    const hoursIn = h('input.input.r-input.r-hours', { type: 'number', min: '0.5', max: '12', step: '0.5', value: '6', 'aria-label': 'Hours', inputmode: 'decimal' });
+    const dial = createTimeDial({ hours: 6 });
     const modeBtns = [['queue', 'Queue'], ['preempt', 'Start now']].map(([k, label]) => h('button', { 'aria-pressed': String(k === mode), onclick: () => setMode(k) }, label));
     const hint = h('div.r-row-sub');
     const err = h('div.c-err', { role: 'alert' });
@@ -638,7 +647,7 @@ export function createResearch() {
       if (!titleIn.value.trim()) { err.textContent = 'Give the mission a title.'; titleIn.focus(); return; }
       if (briefIn.value.trim().length < 20) { err.textContent = 'Write a brief: a few sentences on what to find out.'; briefIn.focus(); return; }
       go.disabled = true;
-      const r = await command({ cmd: 'mission', title: titleIn.value.trim(), brief: briefIn.value, mode, hours: Number(hoursIn.value) || 6 }, 'Mission sent');
+      const r = await command({ cmd: 'mission', title: titleIn.value.trim(), brief: briefIn.value, mode, hours: dial.hours || 12 }, 'Mission sent');
       go.disabled = false;
       if (r) closeSheet();
     } }, 'Send mission', icon('send', 15));
@@ -647,7 +656,7 @@ export function createResearch() {
       section('Title', null, titleIn),
       section('Brief', null, briefIn),
       section('When', h('div.seg.seg-sm', null, modeBtns), hint),
-      section('Hours', null, h('div.r-compose-foot', null, h('div.r-row-sub', null, 'Planned length, 0.5 to 12. The box session deadline still wins.'), hoursIn)),
+      section('How long', null, h('div.r-row-sub', null, 'Any length from 15 minutes to 12 hours. The box session deadline still wins.'), dial.el),
       err, h('div.r-btnrow', null, go));
     openSheet('mission', null, h('div.r-sheet-title', null, h('span.r-orb.lg.core'), h('div', null, h('h2.r-h2', null, 'New mission'), h('div.r-sheet-sub', null, 'a research brief'))), body);
     setMode('queue');

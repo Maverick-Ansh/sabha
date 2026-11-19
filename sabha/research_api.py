@@ -17,6 +17,7 @@ import calendar
 import logging
 import os
 import re
+import threading
 import time
 
 import aiohttp
@@ -37,7 +38,7 @@ DOC_MAX = 200 * 1024
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,80}$")
 DOCS = {  # kind -> path parts; "{t}" is the track id
     "status": ("STATUS.md",), "digest": ("DIGEST.md",), "synthesis": ("synthesis.md",), "brief": ("brief.md",),
-    "living": ("REPORT.md",), "knowledge": ("knowledge.md",),
+    "living": ("REPORT.md",), "knowledge": ("knowledge.md",), "notebook": ("NOTEBOOK.md",), "final": ("final.md",),
     "report": ("tracks", "{t}", "report.md"), "track_digest": ("tracks", "{t}", "digest.md"),
     "assignment": ("tracks", "{t}", "assignment.md"),
 }
@@ -146,6 +147,7 @@ class Research:
         self._cache: dict[str, tuple] = {}
         self._summaries: dict[tuple, dict] = {}
         self._sum_locks: dict[tuple, asyncio.Lock] = {}
+        self._refining: dict[str, dict] = {}  # mission id -> {running, started, error, done}
 
     # ------------------------------------------------------------ files
 
@@ -328,6 +330,9 @@ class Research:
                           "has_synthesis": os.path.isfile(os.path.join(root, "synthesis.md")),
                           "has_report": os.path.isfile(os.path.join(root, "REPORT.md")),
                           "has_knowledge": os.path.isfile(os.path.join(root, "knowledge.md")),
+                          "has_notebook": os.path.isfile(os.path.join(root, "NOTEBOOK.md")) or os.path.isdir(os.path.join(root, "cards")),
+                          "has_final": os.path.isfile(os.path.join(root, "final.md")),
+                          "refining": {k: v for k, v in (self._refining.get(L["id"]) or {}).items() if k != "thread"} or None,
                           "waves": self._waves(root)}
         out["daemon"] = {"alive": L["alive"], "age_s": None if L["age"] > 1e8 else int(L["age"])}
         out["agents"] = [self._row(L, i, t) for i, t in enumerate(plan.get("tracks") or []) if t.get("id")]
@@ -450,11 +455,101 @@ class Research:
         if any("{t}" in p for p in parts) and tid not in self._track_ids(L):
             raise ApiError(404, f"no agent {tid!r}")
         path = os.path.join(L["root"], *[p.replace("{t}", tid) for p in parts])
+        if kind == "notebook" and not os.path.exists(path):  # a run from before the notebook: build it from the event log
+            from .research import notebook as NB
+            from .research.memory import Mission
+            try:
+                NB.backfill(Mission(L["root"]))
+            except Exception as e:  # the doc stays "not written yet"
+                log.warning("notebook backfill %s: %s", L["id"], e)
         try:
             mtime = os.stat(path).st_mtime
         except OSError:
             raise ApiError(404, f"{kind} is not written yet") from None
         return {"kind": kind, "track": tid, "mission": L["id"], "md": _read_text(path), "mtime": mtime}
+
+    # ------------------------------------------------------------ GET /api/research/papers
+
+    def papers(self, mission_id: str | None = None) -> dict:
+        """Every paper card of a mission, compact: the report's citation chips and the Papers shelf read this."""
+        L = self._load(mission_id) if self.available() else None
+        if L is None:
+            raise ApiError(404, "no research mission")
+        from .research.notebook import best_result
+        tracks = [t for t in L["plan"].get("tracks") or [] if t.get("id")]
+        hue = {t["id"]: HUES[i % len(HUES)] for i, t in enumerate(tracks)}
+        d = os.path.join(L["root"], "cards")
+        out = []
+        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+            if not f.endswith(".json"):
+                continue
+            c = self._cached(os.path.join(d, f), lambda p: read_json(p, {}) or {}, {})
+            if not c.get("id"):
+                continue
+            repo = c.get("official_repo") or {}
+            res = [{"metric": str(r.get("metric") or "").replace("_", " "), "value": str(r.get("value") or ""),
+                    "setting": str(r.get("setting") or "")[:80], "claim": str(r.get("claim") or "")[:240]}
+                   for r in c.get("results") or [] if str(r.get("value") or "").strip()][:4]
+            tr = c.get("tracks") or []
+            out.append({"id": c["id"], "title": c.get("title", ""), "one_line": c.get("one_line", ""),
+                        "why": c.get("why_it_matters", ""), "tracks": tr, "hue": hue.get(tr[0]) if tr else None,
+                        "best": best_result(c), "results": res, "grade": (c.get("quality") or {}).get("grade", ""),
+                        "relevance": c.get("relevance"), "submitted": str(c.get("first_submitted") or "")[:16],
+                        "model_type": c.get("model_type") or [], "wave": c.get("wave"),
+                        "repo": repo.get("url") if repo.get("status") == "verified" else None,
+                        "method": str((c.get("training_method") or {}).get("text") or "")[:300],
+                        "limits": [str(x.get("text", ""))[:200] for x in (c.get("limitations") or [])[:2]],
+                        "t": _epoch(c.get("ts"))})
+        out.sort(key=lambda x: -x["t"])
+        return {"mission": L["id"], "tracks": [{"id": t["id"], "name": t.get("name", t["id"]), "hue": hue[t["id"]]} for t in tracks],
+                "papers": out}
+
+    # ------------------------------------------------------------ POST /api/research/refine
+
+    def refine(self, mission_id: str | None = None) -> dict:
+        """Write the finished report of a run that has ended (a run from before the notebook, or one whose refine pass
+        failed): notebook backfill, refine, REPORT.md. Runs in a thread on the box's models; the overview shows it."""
+        L = self._load(mission_id) if self.available() else None
+        if L is None:
+            raise ApiError(404, "no research mission")
+        if L["alive"] and L["meta"].get("status") == "running":
+            raise ApiError(409, "the run is still going: its report is refined when it ends")
+        cur = self._refining.get(L["id"]) or {}
+        if cur.get("running"):
+            return {k: v for k, v in cur.items() if k != "thread"}
+        runner = getattr(self.hub, "runner", None)
+        served = runner._served() if runner is not None and hasattr(runner, "_served") else set()
+        if getattr(self.hub.cfg, "demo", False) or not ({"deep", "reader"} & served):
+            raise ApiError(409, "no model is ready to write the report: wait until a model shows as ready")
+        from .research import llm, notebook as NB, waves as W
+        from .research.memory import Mission
+        for role in ("deep", "reader", "s1"):
+            if role not in served:
+                llm.OVERRIDE[role] = "reader" if "reader" in served else "deep"
+        for mdl in self.hub.store.models.values():
+            role = (mdl.get("served_name") or "").lower()
+            if role in llm.ROLES and mdl.get("context_window"):
+                name, port, conc, _ = llm.ROLES[role]
+                llm.ROLES[role] = (name, port, conc, int(mdl["context_window"]))
+        st = {"running": True, "started": time.time(), "error": "", "done": 0.0}
+        root, mid = L["root"], L["id"]
+
+        def work():
+            try:
+                m = Mission(root)
+                NB.backfill(m)
+                NB.refine(m)
+                W.render_report(m, final=True)
+                st["done"] = time.time()
+            except Exception as e:
+                log.exception("refine %s", mid)
+                st["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            finally:
+                st["running"] = False
+        st["thread"] = threading.Thread(target=work, name=f"refine-{mid}", daemon=True)
+        self._refining[mid] = st
+        st["thread"].start()
+        return {k: v for k, v in st.items() if k != "thread"}
 
     # ------------------------------------------------------------ POST /api/research/summary/{tid}
 
@@ -578,6 +673,13 @@ def add_routes(router, hub_of, body_of) -> None:
         q = request.query
         return web.json_response(await asyncio.to_thread(res(request).doc, q.get("kind", ""), q.get("track", ""), mid(request)))
 
+    async def get_papers(request):
+        return web.json_response(await asyncio.to_thread(res(request).papers, mid(request)))
+
+    async def post_refine(request):
+        body = await body_of(request)
+        return web.json_response(await asyncio.to_thread(res(request).refine, (body or {}).get("mission") or mid(request)))
+
     async def post_summary(request):
         return web.json_response(await res(request).summary(request.match_info["tid"], mid(request)))
 
@@ -593,5 +695,7 @@ def add_routes(router, hub_of, body_of) -> None:
     router.add_get("/api/research/agent/{tid}", get_agent)
     router.add_get("/api/research/card/{aid}", get_card)
     router.add_get("/api/research/doc", get_doc)
+    router.add_get("/api/research/papers", get_papers)
+    router.add_post("/api/research/refine", post_refine)
     router.add_post("/api/research/summary/{tid}", post_summary)
     router.add_post("/api/research/command", post_command)

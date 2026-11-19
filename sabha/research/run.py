@@ -20,7 +20,7 @@ import threading
 import time
 import traceback
 
-from . import agents as A, inbox, live, llm, longmem, sources as src, trace, waves as W
+from . import agents as A, inbox, live, llm, longmem, notebook as NB, sources as src, trace, waves as W
 from .index import Index
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
@@ -166,6 +166,11 @@ class Daemon:
                 res = A.read_paper(self.m, aid, self.idx, self.budget, self.steer, max_chunks=int(self.params["max_chunks"]),
                                    tier_b=reg.get("via") == "seed")
                 if res == "carded":
+                    try:
+                        NB.add_paper(self.m, aid)
+                        W.render_report(self.m)  # the living report shows every paper the moment it is read
+                    except Exception as e:
+                        self.err(f"notebook {aid}: {type(e).__name__}: {str(e)[:120]}")
                     tid = self.m.reg[aid].get("track")
                     ts = self.track_state.setdefault(tid, {})
                     ts.setdefault("new_cards", []).append(aid)
@@ -224,6 +229,7 @@ class Daemon:
                         ts["new_cards"] = []
                         with self.cons_lock:
                             A.consolidate(m, tid, new)
+                        self.note(tid, new)
                         A.rebuild_playbook(m, self.steer.get("lessons", []))
                         ts["last_cons"] = time.time()
                         did = True
@@ -251,6 +257,14 @@ class Daemon:
                 traceback.print_exc()
                 live.idle()
                 time.sleep(60)
+
+    def note(self, tid: str, ids: list[str]) -> None:
+        """The lab note after a consolidation, and the living report rebuilt with it: the report grows all run long."""
+        try:
+            NB.think(self.m, tid, ids, W.question_of(self.m))
+            W.render_report(self.m)
+        except Exception as e:
+            self.err(f"notebook note {tid}: {type(e).__name__}: {str(e)[:160]}")
 
     # ------------------------------------------------------------ waves (continuous runs, research/waves.py)
     def wave_due(self, left: float) -> bool:
@@ -284,7 +298,20 @@ class Daemon:
                     A.write_report(m, tid)
                 self.final_reports_done = True
             self.close_run()
+            for tid in m.track_ids():  # cards read since the last consolidation still get their note
+                ts = self.track_state.setdefault(tid, {})
+                new, ts["new_cards"] = ts.get("new_cards") or [], []
+                if new:
+                    with self.cons_lock:
+                        A.consolidate(m, tid, new)
+                    self.note(tid, new)
             A.write_synthesis(m, final=True)
+            live.begin(step="refining the report", final=True)
+            try:
+                NB.refine(m)
+            except Exception as e:
+                self.err(f"refine: {type(e).__name__}: {str(e)[:200]}")
+                traceback.print_exc()
             W.render_report(m, final=True)
             append(m.p("state", "notify.jsonl"), {"kind": "done", "headline": W.headline_of_synthesis(m),
                                                   "cards": m.count("carded"), "waves": len((self.waves or {}).get("history") or [])})
@@ -326,6 +353,7 @@ class Daemon:
             if new:
                 with self.cons_lock:
                     A.consolidate(m, tid, new)
+                self.note(tid, new)
         old = int(self.waves.get("n") or 1)
         print(f"[run] wave {old} turnover", flush=True)
         self.waves = W.turnover(m, self.waves, self.until, self.M["reports"], self.home, self.track_state)

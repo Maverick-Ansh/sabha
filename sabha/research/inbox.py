@@ -65,7 +65,7 @@ def clean(body: dict, track_ids: list[str]) -> dict:
             hours = float(body.get("hours") or 12)
         except (TypeError, ValueError):
             raise ValueError("hours must be a number") from None
-        rec.update(title=title, brief=brief, mode=mode, hours=min(max(hours, 0.5), 12.0))
+        rec.update(title=title, brief=brief, mode=mode, hours=min(max(hours, 0.25), 12.0))
         return rec
     track = body.get("track") or "all"
     if track != "all" and track not in track_ids:

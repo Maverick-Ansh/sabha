@@ -23,7 +23,7 @@ import os
 import re
 import time
 
-from . import live, llm, longmem, trace
+from . import live, llm, longmem, notebook as NB, trace
 from .agents import ARR, ENUM, OBJ, STR, _card_brief, _strip_unknown_cites, _sys, rank_cards, render_digest
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
@@ -116,10 +116,14 @@ def _read(path: str, limit: int) -> str:
         return ""
 
 
+EMBED = re.compile(r"!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)")  # Obsidian and markdown images pasted into a brief
+
+
 def question_of(m: Mission, limit: int = 1500) -> str:
     brief = _read(m.p("brief.md"), 20000)
-    mm = re.search(r"^## The question\s*\n(.*?)(?=^## |\Z)", brief, re.S | re.M)
-    return (mm.group(1).strip() if mm else m.plan.get("one_line", ""))[:limit]
+    mm = re.search(r"^## The question\s*\n(.*?)(?=^#{1,2} |\Z)", brief, re.S | re.M)
+    q = EMBED.sub("", mm.group(1) if mm else m.plan.get("one_line", ""))
+    return re.sub(r"\n{3,}", "\n\n", q).strip()[:limit]
 
 
 def knowledge(m: Mission, limit: int = KNOWLEDGE_MAX) -> str:
@@ -159,7 +163,8 @@ def chapter(m: Mission, w: dict, ended: float) -> tuple[str, str, int]:
         ranked = {c["id"]: i for i, c in enumerate(sum((rank_cards(m, t) for t in m.track_ids()), []))}
         cards.sort(key=lambda c: ranked.get(c["id"], 999))
         user = (today() + f"MISSION: {m.plan.get('one_line', '')}\nTHE QUESTION OF THIS RUN:\n{question_of(m)}\n\n"
-                f"WHAT THE TEAM KNEW BEFORE THIS WAVE:\n{knowledge(m, 3500) or '(nothing yet: this is the first wave)'}\n\n"
+                f"WHAT THE TEAM KNEW BEFORE THIS WAVE (do not repeat it: write only what this wave adds):\n"
+                f"{knowledge_excerpt(m, 1800) or '(nothing yet: this is the first wave)'}\n\n"
                 f"PAPERS CARDED IN WAVE {n} (cite as [id]):\n" + "\n".join(_card_brief(c, 2) for c in cards[:24]) +
                 "\n\nCHANGES TO THE CLAIMS LEDGERS IN THIS WAVE:\n" + ("\n".join(changes) or "(none)") +
                 "\n\nSEARCHES THIS WAVE THAT FOUND NOTHING USEFUL:\n" + ("\n".join(f"- {d}" for d in dead) or "(none)") +
@@ -177,13 +182,32 @@ def chapter(m: Mission, w: dict, ended: float) -> tuple[str, str, int]:
         except llm.LLMError as e:
             txt = (f"HEADLINE: {len(cards)} papers read this wave (the chapter could not be written: {str(e)[:80]})\n\n"
                    "### What we found\n\n" + "\n".join(f"- [{c['id']}] {c.get('title', '')[:100]}: {c.get('one_line', '')[:200]}" for c in cards[:15]))
+        txt = NB.unjson(txt, 3)
+        prev = _read(m.p("waves", f"w{n - 1:02d}.md"), 20000) if n > 1 else ""
+        if prev and overlap(txt, prev) > 0.45:  # a small model copied the last chapter (seen on a real run): say what is new instead
+            m.log("chapter_repeat", n=n, overlap=round(overlap(txt, prev), 2))
+            txt = (f"HEADLINE: {len(cards)} papers read in wave {n} (the model's chapter repeated the last wave, so this one "
+                   "lists what the papers themselves say)\n\n### What we found\n\n"
+                   + "\n".join(f"- [{c['id']}] {c.get('one_line', '')[:240]}" + (f" ({NB.best_result(c)})" if NB.best_result(c) else "")
+                               for c in cards[:15]))
         hm = HEADLINE.search(txt)
         headline = (hm.group(1).strip().strip("*") if hm else f"{len(cards)} papers read in wave {n}")[:240]
         body = HEADLINE.sub("", txt, count=1).strip()
         body = re.sub(r"^#{1,2} (?!#)", "### ", body, flags=re.M)  # the chapter's own headings stay below its '## Wave' line
-        md = f"{head}\n\n**{headline}**\n\n{_strip_unknown_cites(m, body)}\n"
+        papers = "\n".join(f"- [{c['id']}] **{c.get('title', '')[:110]}**: {c.get('one_line', '')[:200]}"
+                           + (f" _{NB.best_result(c)}_" if NB.best_result(c) else "") for c in cards[:24])
+        md = f"{head}\n\n**{headline}**\n\n{_strip_unknown_cites(m, body)}\n\n### Papers read in this wave\n\n{papers}\n"
     write(m.p("waves", f"w{n:02d}.md"), md)
     return headline, md, len(cards)
+
+
+def overlap(a: str, b: str) -> float:
+    """Share of a's 5-word runs that also appear in b: near 1 when a model copied b."""
+    def grams(t):
+        w = re.findall(r"[a-z0-9]+", t.lower())
+        return {" ".join(w[i:i + 5]) for i in range(max(len(w) - 4, 0))}
+    ga, gb = grams(a), grams(b)
+    return len(ga & gb) / len(ga) if ga else 0.0
 
 
 # ---------------------------------------------------------------- 2. compaction: the state of knowledge
@@ -216,15 +240,53 @@ def compact(m: Mission, chapter_md: str, n: int) -> str:
         txt = llm.chat("deep", _sys("You keep the team's state of knowledge: the short document every agent reads at the start "
                                     "of every step. You rewrite it after each wave of work. Markdown, under 900 words."),
                        user, max_tokens=1600, temperature=0.3, timeout=420)
-        txt = re.sub(r"^# .*\n", "", txt.strip())
-        if "## " not in txt:
+        txt = _knowledge_headings(NB.unjson(txt, 2))
+        if sum(1 for s in KNOWLEDGE_SECTIONS if re.search(r"^## +" + re.escape(s), txt, re.M | re.I)) < 3:
             raise llm.LLMError("no sections")
-    except llm.LLMError:
-        old = knowledge(m)
-        txt = (re.sub(r"^# .*\n", "", old).strip() + "\n\n" if old else "") + f"## Latest wave\n\n{chapter_md[:2500]}"
+        if overlap(txt, chapter_md) > 0.6:
+            raise llm.LLMError("the chapter was copied, not compacted")
+    except llm.LLMError as e:
+        m.log("compact_fail", n=n, err=str(e)[:200])
+        txt = knowledge_from_ledgers(m, chapter_md)
     out = f"# State of knowledge after wave {n} ({now()})\n\n{_strip_unknown_cites(m, txt.strip())}\n"
     write(m.p("knowledge.md"), out[:KNOWLEDGE_MAX])
     return out
+
+
+def _knowledge_headings(txt: str) -> str:
+    """'**Answer so far**', '### Established:' or '1. Open questions' as the '## ' headings compaction expects."""
+    txt = re.sub(r"^# .*\n", "", txt.strip())
+    names = "|".join(re.escape(s) for s in KNOWLEDGE_SECTIONS)
+    return re.sub(r"^[ \t]*(?:#{1,6}[ \t]*|\d+[.)][ \t]*)?\**[ \t]*(" + names + r")[ \t]*\**[ \t]*:?[ \t]*\**[ \t]*$",
+                  lambda mm: "## " + next(s for s in KNOWLEDGE_SECTIONS if s.lower() == mm.group(1).lower()), txt, flags=re.M | re.I)
+
+
+def knowledge_from_ledgers(m: Mission, chapter_md: str) -> str:
+    """The state of knowledge without a model: the wave's headline, the best-supported claims, the contested ones, the
+    questions nobody has answered, the dead searches. Never the chapter itself (pasting it made the report repeat)."""
+    hm = re.search(r"^\*\*(.+?)\*\*\s*$", chapter_md, re.M)
+    claims = []
+    for tid in m.track_ids():
+        claims += [c for c in m.claims(tid).values() if c.get("status") != "retired"]
+    sup = sorted([c for c in claims if c.get("status") != "contested"], key=lambda c: -len(c.get("for", [])))[:10]
+    con = [c for c in claims if c.get("status") == "contested"][:8]
+    hit = {c.get("q") for c in claims}
+    open_q = []
+    for t in m.plan.get("tracks", []):
+        if not t.get("retired"):
+            open_q += [q["text"][:220] for q in t.get("questions", []) if q["id"] not in hit][:3]
+
+    def cite(ids):
+        return " ".join(f"[{x}]" for x in ids[:4])
+    return "\n\n".join([
+        "## Answer so far\n\n" + ((hm.group(1).strip() + " ") if hm else "") + "_(Built from the claims ledgers: the model's "
+        "rewrite of this state failed this wave.)_",
+        "## Established\n\n" + ("\n".join(f"- {c.get('text', '')[:260]} {cite(c.get('for', []))}" for c in sup) or "- nothing yet"),
+        "## Contested\n\n" + ("\n".join(f"- {c.get('text', '')[:220]} (for {cite(c.get('for', []))}; against {cite(c.get('against', []))})"
+                                        for c in con) or "- none"),
+        "## Open questions\n\n" + ("\n".join(f"{i}. {q}" for i, q in enumerate(open_q[:8], 1)) or "1. none recorded"),
+        "## Dead ends\n\n" + ("\n".join(f"- {d}" for d in dead_searches(m, 0, 8)) or "- none recorded"),
+        "## Next directions\n\n- the open questions above"])
 
 
 # ---------------------------------------------------------------- 3. long-term memory
@@ -377,38 +439,64 @@ def _demote(md: str, by: int = 1) -> str:
     return re.sub(r"^(#{1,5}) ", lambda mm: "#" * min(len(mm.group(1)) + by, 6) + " ", md, flags=re.M)
 
 
-def render_report(m: Mission, final: bool = False) -> str:
-    """REPORT.md: the one document the owner reads. Rebuilt from its parts, so every wave appends a chapter."""
+def _title(m: Mission) -> str:
     brief = _read(m.p("brief.md"), 3000)
     tm = re.search(r"^title:\s*(.+)$", brief, re.M) or re.search(r"^#\s+(.+)$", brief, re.M)
-    title = tm.group(1).strip() if tm else m.id
-    w = load(m)
+    return tm.group(1).strip() if tm else m.id
+
+
+def render_report(m: Mission, final: bool = False) -> str:
+    """REPORT.md: the one document the owner reads. While the run goes it is the living report (where we stand, the
+    newest notebook notes, every wave's chapter, every paper so far); at the end it is the refined report (final.md)
+    with the wave log below. Rebuilt from its parts, so it is never out of date."""
+    with NB.RENDER_LOCK:
+        return _render_report(m, final)
+
+
+def _render_report(m: Mission, final: bool = False) -> str:
+    title = _title(m)
     chapters = sorted(glob.glob(m.p("waves", "w*.md")))
-    cards = sum(1 for r in m.reg.values() if r.get("state") == "carded")
+    cards = [c for c in m.cards()]
+    q = question_of(m, 1600)
+    fin = _read(m.p("final.md"), 400000) if final else ""
+    if fin:
+        L = [f"# {title}", "", f"**The question.** {q}", "", fin.strip(), ""]
+        if chapters:
+            L += ["## Wave log", "", "_The chapter each wave wrote when it closed, oldest first._", ""]
+            L += [_demote(_read(p, 20000).strip(), 1) + "\n" for p in chapters]
+        out = "\n".join(L).rstrip() + "\n"
+        write(m.p("REPORT.md"), out)
+        return out
     L = [f"# {title}", "",
          f"_Living report · {'continuous research, ' + str(len(chapters)) + (' wave' if len(chapters) == 1 else ' waves') if chapters else 'one pass'}"
-         f" · {cards} papers read · "
-         f"updated {now()}_", "", f"**The question.** {question_of(m, 1200)}", ""]
-    syn = _read(m.p("synthesis.md"), 60000)
+         f" · {len(cards)} papers read · updated {now()}_", "", f"**The question.** {q}", ""]
+    syn = NB.unjson(_read(m.p("synthesis.md"), 60000))
     if final and syn:
         L += ["## The answer", "", _demote(re.sub(r"^# .*\n", "", syn.strip()), 1).strip(), ""]
     k = knowledge(m)
     if k:
         L += ["## Where we stand" + (f" (after wave {len(chapters)})" if chapters else ""), "",
               _demote(re.sub(r"^# .*\n", "", k.strip()), 1).strip(), ""]
+    notes = NB.latest_notes(m, 5)
+    if notes:
+        L += ["## From the lab notebook", "", "_The newest notes the team wrote while reading. The whole notebook is in its own tab._", ""]
+        for e in notes[::-1]:
+            L += [f"### {NB._hhmm(e.get('ts'))} · {e.get('track', '')} · wave {e.get('wave', 1)}", "", e.get("text", ""), ""]
     if chapters:
         L += ["## Wave log", "", "_One chapter per wave, oldest first. Each wave started from the state of knowledge above it._", ""]
         for p in chapters:
             L += [_demote(_read(p, 20000).strip(), 1), ""]
     if syn and not final:
         L += ["## Synthesis draft", "", _demote(re.sub(r"^# .*\n", "", syn.strip()), 1).strip(), ""]
-    reps = []
-    for t in m.plan.get("tracks", []):
-        if os.path.exists(m.p("tracks", t["id"], "report.md")):
-            reps.append(f"- {t['id']} {t['name']}{' (retired in wave ' + str(t['retired']) + ')' if t.get('retired') else ''}: "
-                        f"tracks/{t['id']}/report.md")
-    if reps:
-        L += ["## Track reports", ""] + reps + [""]
+    if cards:
+        from .agents import rank_cards
+        ranked, seen = [], set()
+        for t in m.plan.get("tracks", []):
+            for c in rank_cards(m, t["id"]):
+                if c["id"] not in seen:
+                    seen.add(c["id"])
+                    ranked.append(c)
+        L += ["## Papers so far", "", NB.comparison_table(ranked, 40), ""]
     out = "\n".join(L).rstrip() + "\n"
     write(m.p("REPORT.md"), out)
     return out
@@ -452,6 +540,7 @@ def turnover(m: Mission, w: dict, until: float, end_margin: float, home: str, tr
     else:
         nxt.update(closed=True)
     save(m, nxt)
+    NB.add_wave(m, int(w["n"]), headline, n_cards)
     render_report(m, final=False)
     m.log("wave", n=int(w["n"]), cards=n_cards, headline=headline, final=final, next=None if final else nxt["n"])
     trace.emit("text", f"Wave {int(w['n'])} closed ({n_cards} papers): {headline}"

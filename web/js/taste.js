@@ -6,6 +6,7 @@ import { h, icon, setText, autogrow } from './dom.js';
 import { get, post, api, getToken, enc } from './api.js';
 import { fmtAgo, fmtDur } from './format.js';
 import { toast } from './notify.js';
+import { createTimeDial, fmtLen } from './timedial.js';
 
 const put = (p, b) => api('PUT', p, b);
 
@@ -33,20 +34,20 @@ export function createTaste({ onChange } = {}) {
     h('button.t-mode', { type: 'button', 'aria-pressed': 'false', 'data-mode': k, onclick: () => { mode = k; paintMode(); saveTaste(); } },
       h('span.t-mode-l', null, label), h('span.t-mode-s', null, sub)));
   const modeSeg = h('div.t-modes', { role: 'radiogroup', 'aria-label': 'How long the agents work' }, modeBtns);
-  const HOURS = [[1, '1 h'], [2, '2 h'], [4, '4 h'], [6, '6 h'], [8, '8 h'], [0, 'until the session ends']];
-  const hoursIn = h('select.select', { 'aria-label': 'Hours' }, HOURS.map(([v, t]) => h('option', { value: String(v) }, t)));
   const waveIn = h('select.select', { 'aria-label': 'Minutes per wave' },
-    [[0, 'automatic'], [20, '20 min'], [30, '30 min'], [45, '45 min'], [60, '60 min'], [90, '90 min']].map(([v, t]) => h('option', { value: String(v) }, t)));
-  const contRow = h('div.t-row.t-cont', null,
-    h('label.field', null, h('span.micro', null, 'how long', h('span.dim', null, ' · a Kaggle session lasts 12 h at most')), hoursIn),
-    h('label.field', null, h('span.micro', null, 'minutes per wave', h('span.dim', null, ' · after each wave: chapter, compact, forget, re-plan')), waveIn));
+    [[0, 'automatic'], [10, '10 min'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [45, '45 min'], [60, '60 min'], [90, '90 min']].map(([v, t]) => h('option', { value: String(v) }, t)));
+  const dial = createTimeDial({ hours: 4, wave: () => waveIn.value, onChange: () => { paintMode(); saveTaste(); } });
+  const contRow = h('div.t-cont', null,
+    h('div.field', null, h('span.micro', null, 'how long', h('span.dim', null, ' · any length from 15 min to 12 h; a Kaggle session lasts 12 h at most')), dial.el),
+    h('label.field.t-wave', null, h('span.micro', null, 'minutes per wave', h('span.dim', null, ' · after each wave: chapter, compact, forget, re-plan')), waveIn));
+  waveIn.addEventListener('change', () => dial.refresh());
   const modeNote = h('p.t-mode-note.dim');
   const keyIn = h('input.input.mono', { type: 'password', placeholder: 'tvly-…  (optional)', autocomplete: 'off', 'aria-label': 'Tavily key' });
   const keyNote = h('span.micro.dim');
   const startBtn = h('button.btn.brand', { onclick: () => startRun() }, icon('play', 15), 'Start research');
   const saveNote = h('span.micro.dim');
   [tasteIn, lovesIn, topicIn].forEach((t) => autogrow(t, 260));
-  for (const t of [tasteIn, lovesIn, topicIn, hoursIn, waveIn]) t.addEventListener('change', () => saveTaste());
+  for (const t of [tasteIn, lovesIn, topicIn, waveIn]) t.addEventListener('change', () => saveTaste());
   keyIn.addEventListener('change', () => saveKey());
 
   const lab = (k, sub, el) => h('label.field', null, h('span.micro', null, k, sub ? h('span.dim', null, ' · ' + sub) : null), el);
@@ -62,15 +63,14 @@ export function createTaste({ onChange } = {}) {
   function paintMode() {
     modeBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
     contRow.hidden = mode !== 'continuous';
-    const hrs = Number(hoursIn.value);
+    const hrs = dial.hours;
     setText(modeNote, mode === 'instant'
       ? 'Instant: the agents plan two or three tracks, read what fits in about 20 minutes and write the answer.'
-      : `Continuous: the agents work ${hrs ? 'for ' + hrs + ' h' : 'until the session ends'} in waves. After every wave they add a chapter to the report, `
-        + 'compact what they know, keep lessons in long-term memory, clear their context and re-plan where the open questions are. '
-        + 'You get a message after each wave if alerts are on (Crew, Alerts).');
+      : `Continuous: the agents work ${hrs ? 'for ' + fmtLen(hrs * 60) : 'until the session ends'}. All along they keep a lab notebook: every paper `
+        + 'they read and a note after each batch. Each wave closes with a chapter, then they compact what they know, clear their context and re-plan. '
+        + 'At the end the notebook is refined into the finished report: the answer, key findings, a comparison table, experiments to run and every paper.');
     setText(startBtn.lastChild, mode === 'instant' ? 'Start instant research' : 'Start continuous research');
   }
-  hoursIn.addEventListener('change', paintMode);
   const toggleBtn = h('button.btn.ghost.sm', { onclick: () => { open = !open; paint(); } });
   const head = h('div.r-card-head', null, h('h2.r-h2', null, 'Your research'), h('span.spacer'), toggleBtn);
   const el = h('section.card.r-card.t-card', null, head, runStrip, form);
@@ -80,8 +80,8 @@ export function createTaste({ onChange } = {}) {
     try {
       const [t, s] = await Promise.all([get('/api/taste'), get('/api/settings')]);
       tasteIn.value = t.taste || ''; topicIn.value = t.topic || ''; lovesIn.value = (t.loves || []).join('\n');
-      hoursIn.value = String(HOURS.some(([v]) => v === Number(t.hours)) ? Number(t.hours) : 4);
-      waveIn.value = String([0, 20, 30, 45, 60, 90].includes(Number(t.wave_min)) ? Number(t.wave_min) : 0);
+      waveIn.value = String([0, 10, 15, 20, 30, 45, 60, 90].includes(Number(t.wave_min)) ? Number(t.wave_min) : 0);
+      dial.hours = Number.isFinite(Number(t.hours)) ? Number(t.hours) : 4;
       mode = t.mode === 'instant' ? 'instant' : 'continuous';
       paintMode();
       paintKey(s);
@@ -90,7 +90,7 @@ export function createTaste({ onChange } = {}) {
     } catch { /* the hub may be older than this page: leave the form empty */ }
   }
   function body() {
-    return { taste: tasteIn.value, topic: topicIn.value, loves: lovesIn.value, mode, hours: Number(hoursIn.value), wave_min: Number(waveIn.value) };
+    return { taste: tasteIn.value, topic: topicIn.value, loves: lovesIn.value, mode, hours: dial.hours, wave_min: Number(waveIn.value) };
   }
   async function saveTaste() {
     const n = ++saving;
@@ -112,7 +112,7 @@ export function createTaste({ onChange } = {}) {
     startBtn.disabled = true;
     try {
       const r = await post('/api/research/start', body());
-      const how = r.mode === 'instant' ? 'instant, about 20 min' : r.wave_min ? `${Number(r.hours).toFixed(1)} h in ${r.wave_min}-minute waves` : `${Number(r.hours).toFixed(1)} h`;
+      const how = r.mode === 'instant' ? 'instant, about 20 min' : r.wave_min ? `${fmtLen(Number(r.hours) * 60)} in ${r.wave_min}-minute waves` : fmtLen(Number(r.hours) * 60);
       toast('Research started', { sub: `${r.title || r.mission} · ${how}${r.note ? ' · ' + r.note : ''}. The agents plan first, then read.`, tone: 'mint', timeout: 6000 });
       open = false;
       onChange && onChange();

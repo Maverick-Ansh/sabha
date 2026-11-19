@@ -17,7 +17,7 @@ import argparse
 import os
 import time
 
-from . import live, longmem, trace, waves as W
+from . import live, longmem, notebook as NB, trace, waves as W
 from .memory import Mission, append, now, read_json, read_jsonl, write, write_json
 
 PAPERS = [("2301.08243", "Self-supervised learning from images with a joint-embedding predictive architecture"),
@@ -95,6 +95,7 @@ def main() -> int:
                 m.log("replanned", wave=2, why="demo", changes=["t3 new: Open questions"])
             wv.update(n=n + 1, started=time.time(), ends=time.time() + a.wave_s, plan_changes=["t3 new: Open questions"] if n == 1 else [])
         W.save(m, wv)
+        NB.add_wave(m, n, headline, len(got))
         W.render_report(m)
         m.log("wave", n=n, cards=len(got), headline=headline, final=final, next=None if final else n + 1)
         append(m.p("state", "notify.jsonl"), {"kind": "wave", "n": n, "cards": len(got), "headline": headline, "final": final})
@@ -129,6 +130,15 @@ def main() -> int:
             m.log("carded", id=aid, track=tid, grade="B", quote_pass=0.9, secs=int(a.every))
             trace.emit("text", f"Wrote the card for \"{title}\" (demo)", track=tid, paper=aid)
             done_cards.append(aid)
+            NB.add_paper(m, aid)
+            if len(done_cards) % 3 == 0:  # the lab note the deep model writes after a consolidation
+                ids = done_cards[-3:]
+                append(m.p("state", "notebook.jsonl"), {"kind": "note", "track": tid, "wave": int(wv.get("n") or 1) if wv else 1, "papers": ids,
+                                                        "text": f"Demo note: {', '.join('[' + x + ']' for x in ids)} read together. The second one "
+                                                                "plans in latent space; the third tests it offline.\n\nIdea: compare both on one benchmark.",
+                                                        "idea": "compare both on one benchmark"})
+                NB.render(m)
+            W.render_report(m)
             t_last_card = time.time()
             live.idle()
             if len(done_cards) % 4 == 0:
@@ -151,6 +161,16 @@ def main() -> int:
           f"## Answer\n\nA demo run: {len(done_cards)} cards, " + ", ".join(f"[{c}]" for c in done_cards) + ".\n"
           + (f"\n## By your taste\n\n{taste[:400]}\n" if taste else ""))
     m.log("synthesis", final=True)
+    live.begin(step="refining the report", final=True)
+
+    def ask(_m, system, user, max_tokens=0):
+        ids = done_cards or ["2301.08243"]
+        if "opening" in system:
+            return f"A demo answer built from {len(ids)} papers, led by [{ids[0]}].\n\nConfidence: low, because this is a demo run."
+        if "key findings" in system:
+            return "\n".join(f"{i}. **Demo finding {i}.** From [{x}]." for i, x in enumerate(ids[:3], 1))
+        return f"### Demo experiment\n\n- **Hypothesis**: it plans better.\n- **Builds on** [{ids[0]}]"
+    NB.refine(m, ask)
     W.render_report(m, final=True)
     append(m.p("state", "notify.jsonl"), {"kind": "done", "headline": W.headline_of_synthesis(m), "cards": len(done_cards),
                                           "waves": len((wv or {}).get("history") or [])})

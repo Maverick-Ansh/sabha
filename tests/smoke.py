@@ -826,6 +826,17 @@ async def main() -> int:
         rep = (croot / "REPORT.md").read_text("utf-8")
         check("continuous: the final report has the answer on top and every wave", rep.index("## The answer") < rep.index("## Wave log")
               and "Wave 2" in rep, rep[:300])
+        check("report: the refined report has findings, a comparison, experiments and the paper dossier",
+              all(x in rep for x in ("## Key findings", "## How the papers compare", "## Experiments worth running", "## The papers",
+                                     "Confidence: low")) and (croot / "final.md").is_file(), [ln for ln in rep.splitlines() if ln.startswith("## ")])
+        st, doc = await api.call("GET", "/api/research/doc?kind=notebook")
+        check("report: the lab notebook is served, papers, notes and waves in order", st == 200 and "· read [" in doc.get("md", "")
+              and "· note ·" in doc["md"] and "wave 1 closed" in doc["md"], str(doc)[:300])
+        st, pp = await api.call("GET", "/api/research/papers")
+        check("report: the paper shelf lists every card with its track hue", st == 200 and len(pp.get("papers") or []) >= 4
+              and all(p.get("hue") and p.get("title") for p in pp["papers"]) and len(pp.get("tracks") or []) == 3, str(pp)[:300])
+        st, r = await api.call("POST", "/api/research/refine", {"mission": cmid})
+        check("report: refine needs a model (409 in demo)", st == 409, str(r)[:200])
         outbox = [json.loads(x) for x in (croot / "state" / "notify.jsonl").read_text("utf-8").splitlines()]
         check("continuous: the notify outbox has the waves and the end", [x["kind"] for x in outbox][-1] == "done"
               and sum(1 for x in outbox if x["kind"] == "wave") >= 2, str(outbox)[:300])

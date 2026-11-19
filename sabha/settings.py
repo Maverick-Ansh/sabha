@@ -129,7 +129,7 @@ class Taste:
     def load(self) -> dict:
         d = _read(self.path)
         try:
-            hours = float(d.get("hours") or 6)
+            hours = float(d["hours"] if d.get("hours") is not None else 6)
         except (TypeError, ValueError):
             hours = 6.0
         mode = d.get("mode") if d.get("mode") in RUN_MODES else "continuous"
@@ -138,7 +138,7 @@ class Taste:
         except (TypeError, ValueError):
             wave = 0.0
         return {"taste": str(d.get("taste") or ""), "loves": [str(x) for x in d.get("loves") or [] if isinstance(x, str)],
-                "topic": str(d.get("topic") or ""), "hours": 0.0 if hours <= 0 else min(max(hours, 0.5), 12.0),
+                "topic": str(d.get("topic") or ""), "hours": 0.0 if hours <= 0 else min(max(hours, 0.25), 12.0),
                 "mode": mode, "wave_min": min(max(wave, 0.0), 180.0), "updated": float(d.get("updated") or 0)}
 
     def save(self, body: dict) -> dict:
@@ -155,7 +155,7 @@ class Taste:
                 h = float(body["hours"])
             except (TypeError, ValueError):
                 raise ApiError(400, "hours must be a number") from None
-            cur["hours"] = 0.0 if h <= 0 else min(max(h, 0.5), 12.0)
+            cur["hours"] = 0.0 if h <= 0 else min(max(h, 0.25), 12.0)
         if "mode" in body:
             if body["mode"] not in RUN_MODES:
                 raise ApiError(400, "mode must be instant or continuous")

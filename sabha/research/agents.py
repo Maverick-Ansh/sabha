@@ -873,7 +873,8 @@ def write_report(m: Mission, tid: str) -> str:
                            max_tokens=1600, temperature=0.4, timeout=420)
         except llm.LLMError as e:
             txt = f"\n_(section group failed: {str(e)[:120]})_\n"
-        parts.append(_strip_unknown_cites(m, txt))
+        from .notebook import unjson
+        parts.append(_strip_unknown_cites(m, unjson(txt, 2)))
     out = "\n\n".join(parts)
     write(m.p("tracks", tid, "report.md"), out)
     m.log("report", track=tid, cards=len(ranked))
@@ -944,7 +945,8 @@ def write_synthesis(m: Mission, final: bool = False) -> str:
                            max_tokens=1600, temperature=0.4, timeout=420)
         except llm.LLMError as e:
             txt = f"_(failed: {str(e)[:100]})_"
-        out.append(_strip_unknown_cites(m, txt))
+        from .notebook import unjson
+        out.append(_strip_unknown_cites(m, unjson(txt, 2)))
     s = "\n\n".join(out)
     write(m.p("synthesis.md"), s)
     m.log("synthesis", final=final)
