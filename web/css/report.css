@@ -218,8 +218,8 @@ html.rp-open { overflow: hidden; }
   .rp-sec { padding-top: 30px; scroll-margin-top: 56px; }
   .rp-sec[data-kind="answer"] > :not(h2) { font-size: 17px; }
   .rp-sec[data-kind="findings"] > ol > li { padding: 14px 14px 14px 52px; }
-  .rp-finding { padding: 15px 15px 10px 50px; border-radius: 18px; }
-  .rp-fn { left: 14px; top: 15px; font-size: 19px; }
+  .rp-finding { padding: 14px 15px 10px; border-radius: 18px; }
+  .rp-fn { position: static; display: block; margin-bottom: 6px; font-size: 19px; }
   .rp-sec[data-kind="findings"] > ol > li::before { left: 14px; font-size: 19px; }
   .rp-exp, .rp-paper, .rp-entry { padding: 15px 15px 11px; border-radius: 18px; }
   .rp-md td:first-child { min-width: 140px; }
