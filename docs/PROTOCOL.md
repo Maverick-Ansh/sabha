@@ -642,3 +642,14 @@ with scroll spy, citations as chips with the paper's short name that open a peek
 card, arXiv, code), Download (.md) and Print (PDF). The run length is chosen on a dial (`web/js/timedial.js`): 15 min
 to 12 h on a log scale, typed values like `1h 40m` kept exact, and a strip showing the waves and when the finished
 report arrives. `taste.hours` accepts 0.25 to 12 (0 = until the session ends).
+
+### Publication dates
+
+Everything the agents read carries its date. Papers: `published` (the first arXiv version's date, else the month in
+the id) on `/api/research/papers` rows, agent cards and queue rows, the notebook (`Published 30 Oct 2024 · read 19 Nov
+2026 at 15:22 UTC`), the comparison table, the dossier, the wave chapters, the fetch line in the live feed, and every
+paper brief a model reads (the refine prompt asks it to say when a result is old). Web: `webtools.search` hits have
+`date` (from Tavily, Brave or Serper, or an arXiv link's month; '' when the engine gives none), and `page_text` puts
+`Published: <date>` first when the page declares one (meta tags, JSON-LD `datePublished`, `<time datetime>`). Talk's
+`web_search`/`read_page`, the council's lookups and Nirmana's search stage show it.
+

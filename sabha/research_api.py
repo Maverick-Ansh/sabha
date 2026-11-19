@@ -77,6 +77,11 @@ def _load_registry(path: str) -> dict:
     return {"reg": reg, "counts": counts, "total": total}
 
 
+def _published(c: dict) -> str:
+    from .research.notebook import published
+    return published(c)
+
+
 def _load_card(path: str) -> dict:
     c = read_json(path, {}) or {}
     q = c.get("quality") or {}
@@ -84,7 +89,7 @@ def _load_card(path: str) -> dict:
     return {"id": c.get("id", ""), "title": c.get("title", ""), "one_line": c.get("one_line", ""),
             "grade": q.get("grade", ""), "quote_pass": q.get("quote_pass"), "causal": c.get("causal_evidence", ""),
             "repo": repo.get("url") if repo.get("status") == "verified" else None,
-            "tracks": c.get("tracks", []), "t": _epoch(c.get("ts"))}
+            "tracks": c.get("tracks", []), "t": _epoch(c.get("ts")), "published": _published(c)}
 
 
 def _slot_text(s: dict) -> str:
@@ -418,7 +423,8 @@ class Research:
         out["cards"] = cards
         queued = sorted((r for r in L["regd"]["reg"].values() if r.get("state") == "queued" and r.get("track") == tid),
                         key=lambda r: -float(r.get("prio") or 0))
-        out["queue"] = [{"id": r.get("id"), "title": r.get("title") or r.get("id"), "via": r.get("via")} for r in queued[:5]]
+        out["queue"] = [{"id": r.get("id"), "title": r.get("title") or r.get("id"), "via": r.get("via"),
+                         "published": _published({"id": r.get("id"), "first_submitted": r.get("created")})} for r in queued[:5]]
         out["digest"] = _read_text(os.path.join(root, "tracks", tid, "digest.md"), 6000)
         rep = _read_text(os.path.join(root, "tracks", tid, "report.md"), DOC_MAX)
         out["report_head"] = rep[:1800]
@@ -495,6 +501,7 @@ class Research:
                         "why": c.get("why_it_matters", ""), "tracks": tr, "hue": hue.get(tr[0]) if tr else None,
                         "best": best_result(c), "results": res, "grade": (c.get("quality") or {}).get("grade", ""),
                         "relevance": c.get("relevance"), "submitted": str(c.get("first_submitted") or "")[:16],
+                        "published": _published(c),
                         "model_type": c.get("model_type") or [], "wave": c.get("wave"),
                         "repo": repo.get("url") if repo.get("status") == "verified" else None,
                         "method": str((c.get("training_method") or {}).get("text") or "")[:300],

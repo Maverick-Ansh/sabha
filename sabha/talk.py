@@ -614,7 +614,8 @@ class TalkManager:
                 hits, engine = webtools.search(q, 6)
             except Exception as e:  # noqa: BLE001 (any engine failure is a message for the model, not a crash)
                 return f"Web search failed: {short(str(e), 300)}", {**step, "result": "failed"}
-            return ("\n\n".join(f"{h.get('title')}\n{h.get('url')}\n{h.get('snippet') or ''}" for h in hits),
+            return ("\n\n".join(f"{h.get('title')}\n{h.get('url')}\n" + (f"Published: {h['date']}\n" if h.get("date") else "")
+                                + (h.get("snippet") or "") for h in hits),
                     {**step, "result": f"{len(hits)} results ({engine})"})
         if name == "read_page":
             url = str(args.get("url") or "").strip()
@@ -627,8 +628,11 @@ class TalkManager:
                 return f"Could not read {url}: {short(str(e), 300)}", {"tool": name, "label": f"read {short(url, 70)}", "result": "failed"}
             i = text.lower().find(find.lower()) if find else -1
             start = max(0, i - 1500) if i >= 0 else 0
-            return (f"{title}\n{url}\n\n{text[start:start + 6000]}",
-                    {"tool": name, "label": f"read {short(title or url, 70)}", "result": f"{len(text) // 1000}k characters", "url": url})
+            pub = re.match(r"Published: ([^\n]+)", text)
+            head = f"{title}\n{url}\n" + (f"Published: {pub.group(1)}\n" if pub and start > 0 else "")
+            return (f"{head}\n{text[start:start + 6000]}",
+                    {"tool": name, "label": f"read {short(title or url, 70)}",
+                     "result": (f"published {pub.group(1).split(' (')[0]} · " if pub else "") + f"{len(text) // 1000}k characters", "url": url})
         return f"There is no tool named {name}.", {"tool": name, "label": f"unknown tool {short(name, 40)}", "result": "failed"}
 
     async def _mock_stream(self, thread: dict, agent: dict, model: dict, piece) -> None:

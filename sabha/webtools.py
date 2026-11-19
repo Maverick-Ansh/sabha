@@ -181,8 +181,8 @@ def pdf_to_text(data: bytes) -> str:
 # ---------------------------------------------------------------- pages
 
 
-def _cache_path(url: str) -> str:
-    return os.path.join(CACHE_DIR, hashlib.sha1(url.encode()).hexdigest() + ".json")
+def _cache_path(url: str) -> str:  # "d1": pages cached before the publication date was added are read again
+    return os.path.join(CACHE_DIR, hashlib.sha1(("d1:" + url).encode()).hexdigest() + ".json")
 
 
 def page_text(url: str, use_cache: bool = True) -> tuple[str, str]:
@@ -209,14 +209,20 @@ def page_text(url: str, use_cache: bool = True) -> tuple[str, str]:
     return title, text
 
 
+def _dated(date: str, text: str, how: str = "") -> str:
+    """The page text with its publication date as the first line, so the agent and the owner both see it."""
+    return (f"Published: {date}{how}\n\n" + text) if date and text else text
+
+
 def _page_text(url: str) -> tuple[str, str]:
     m = ARXIV_ID.search(url) if "arxiv.org" in url else None
     if m:
+        when = arxiv_month(m.group(1))
         try:
             raw, ctype, _ = fetch(f"https://arxiv.org/html/{m.group(1)}{m.group(2) or ''}")
             title, text = html_to_text(raw.decode("utf-8", "replace"))
             if len(text) > 3000:
-                return title, text
+                return title, _dated(when, text, " (first submitted to arXiv)")
         except WebError:
             pass
         url = f"https://arxiv.org/pdf/{m.group(1)}{m.group(2) or ''}"
@@ -226,9 +232,13 @@ def _page_text(url: str) -> tuple[str, str]:
         if len(text) < 200:  # no PDF reader on this box: ask the Jina reader for the text
             raw2, _, _ = fetch("https://r.jina.ai/" + final, timeout=60)
             text = tidy(raw2.decode("utf-8", "replace"))
-        return os.path.basename(urllib.parse.urlparse(final).path), text
+        aid = ARXIV_ID.search(final) if "arxiv.org" in final else None
+        return os.path.basename(urllib.parse.urlparse(final).path), _dated(arxiv_month(aid.group(1)) if aid else "", text,
+                                                                           " (first submitted to arXiv)")
     if "html" in ctype.lower() or raw.lstrip()[:1] == b"<":
-        return html_to_text(raw.decode("utf-8", "replace"))
+        page = raw.decode("utf-8", "replace")
+        title, text = html_to_text(page)
+        return title, _dated(published_in_html(page), text)
     return "", tidy(raw.decode("utf-8", "replace"))
 
 
@@ -299,22 +309,22 @@ def _tavily(query: str, n: int, key: str) -> list[dict]:
     raw, _, _ = fetch("https://api.tavily.com/search", timeout=30,
                       data=json.dumps({"query": query, "max_results": n, "search_depth": "basic"}).encode(),
                       headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    return [{"title": r.get("title") or "", "url": r.get("url") or "", "snippet": _strip(r.get("content") or "")}
-            for r in json.loads(raw).get("results", []) if r.get("url")]
+    return [{"title": r.get("title") or "", "url": r.get("url") or "", "snippet": _strip(r.get("content") or ""),
+             "date": fmt_date(r.get("published_date"))} for r in json.loads(raw).get("results", []) if r.get("url")]
 
 
 def _brave(query: str, n: int, key: str) -> list[dict]:
     raw, _, _ = fetch("https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode({"q": query, "count": n}),
                       headers={"X-Subscription-Token": key, "Accept": "application/json"})
-    return [{"title": _strip(r.get("title") or ""), "url": r.get("url") or "", "snippet": _strip(r.get("description") or "")}
-            for r in (json.loads(raw).get("web") or {}).get("results", []) if r.get("url")]
+    return [{"title": _strip(r.get("title") or ""), "url": r.get("url") or "", "snippet": _strip(r.get("description") or ""),
+             "date": fmt_date(r.get("page_age") or r.get("age"))} for r in (json.loads(raw).get("web") or {}).get("results", []) if r.get("url")]
 
 
 def _serper(query: str, n: int, key: str) -> list[dict]:
     raw, _, _ = fetch("https://google.serper.dev/search", data=json.dumps({"q": query, "num": n}).encode(),
                       headers={"X-API-KEY": key, "Content-Type": "application/json"})
-    return [{"title": r.get("title") or "", "url": r.get("link") or "", "snippet": r.get("snippet") or ""}
-            for r in json.loads(raw).get("organic", []) if r.get("link")]
+    return [{"title": r.get("title") or "", "url": r.get("link") or "", "snippet": r.get("snippet") or "",
+             "date": fmt_date(r.get("date"))} for r in json.loads(raw).get("organic", []) if r.get("link")]
 
 
 KEYED = (("tavily", "TAVILY_API_KEY", _tavily), ("brave", "BRAVE_API_KEY", _brave), ("serper", "SERPER_API_KEY", _serper))
@@ -360,6 +370,79 @@ def relevant(hits: list[dict], words: list[str]) -> list[dict]:
     return keep
 
 
+# ---------------------------------------------------------------- publication dates
+# An agent that reads a page or a paper should know when it was written: a 2019 benchmark result and a 2026 one are
+# not the same evidence. Every page and search hit carries its date when one can be found.
+
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_MON = {m.lower(): i for i, m in enumerate(MONTHS, 1)}
+_DATE_META = re.compile(
+    r"""<meta[^>]+(?:property|name|itemprop)\s*=\s*["'](?:article:published_time|og:article:published_time|datePublished|"""
+    r"""citation_publication_date|citation_date|citation_online_date|dc\.date(?:\.issued)?|dcterms\.created|pubdate|"""
+    r"""publish[-_]?date|sailthru\.date|parsely-pub-date|date)["'][^>]*>""", re.I)
+_CONTENT = re.compile(r"""content\s*=\s*["']([^"']{6,40})["']""", re.I)
+_JSONLD = re.compile(r'"datePublished"\s*:\s*"([^"]{6,40})"')
+_TIME = re.compile(r"""<time[^>]+datetime\s*=\s*["']([^"']{6,40})["']""", re.I)
+
+
+def fmt_date(s) -> str:
+    """'2024-05-23T10:00Z', 'Thu, 23 May 2024', '2024/05/23', 'May 23, 2024', '23 May 2024', '2024-05' -> '23 May 2024'
+    (or 'May 2024'). '' when it is not a date."""
+    t = str(s or "").strip()
+    if not t:
+        return ""
+    m = re.search(r"(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?", t)
+    if m and 1 <= int(m.group(2)) <= 12 and 1900 < int(m.group(1)) < 2100:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+        return (f"{d} " if 1 <= d <= 31 else "") + f"{MONTHS[mo - 1]} {y}"
+    m = re.search(r"(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?,?\s+(\d{4})", t) or None
+    if m and m.group(2).lower() in _MON:
+        return f"{int(m.group(1))} {m.group(2).title()} {m.group(3)}"
+    m = re.search(r"([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})", t)
+    if m and m.group(1).lower() in _MON:
+        return f"{int(m.group(2))} {m.group(1).title()} {m.group(3)}"
+    m = re.search(r"([A-Za-z]{3})[a-z]*\.?\s+(\d{4})", t)
+    if m and m.group(1).lower() in _MON:
+        return f"{m.group(1).title()} {m.group(2)}"
+    return ""
+
+
+def arxiv_month(aid: str) -> str:
+    """The month an arXiv id was first submitted: 2406.10667 -> 'Jun 2024'."""
+    m = re.match(r"(\d{2})(\d{2})\.\d{4,5}", str(aid or ""))
+    if not m or not 1 <= int(m.group(2)) <= 12:
+        return ""
+    return f"{MONTHS[int(m.group(2)) - 1]} 20{m.group(1)}"
+
+
+def published_in_html(page: str) -> str:
+    """The publication date a web page declares (meta tags, JSON-LD, a <time> element), formatted, or ''."""
+    head = page[:300000]
+    for tag in _DATE_META.findall(head):
+        c = _CONTENT.search(tag)
+        d = fmt_date(c.group(1)) if c else ""
+        if d:
+            return d
+    for rx in (_JSONLD, _TIME):
+        m = rx.search(head)
+        d = fmt_date(m.group(1)) if m else ""
+        if d:
+            return d
+    return ""
+
+
+def dated_hits(hits: list[dict]) -> list[dict]:
+    """Every hit with a 'date': the engine's, else an arXiv link's submission month, else ''."""
+    out = []
+    for h in hits:
+        d = h.get("date") or ""
+        if not d and "arxiv.org" in (h.get("url") or ""):
+            m = ARXIV_ID.search(h["url"])
+            d = arxiv_month(m.group(1)) if m else ""
+        out.append({**h, "date": d})
+    return out
+
+
 def search(query: str, n: int = 6, strict: bool = False, wiki: bool = True) -> tuple[list[dict], str]:
     """Web search without a key. Returns (results, engine name). Results: title, url, snippet.
 
@@ -374,7 +457,7 @@ def search(query: str, n: int = 6, strict: bool = False, wiki: bool = True) -> t
         try:
             hits = fn(query, n, key)[:n]
             if hits:
-                return hits, name
+                return dated_hits(hits), name
             errors.append(f"{name}: no results")
         except (WebError, ValueError, KeyError, TypeError, AttributeError) as e:
             errors.append(f"{name}: {e}")
@@ -385,7 +468,7 @@ def search(query: str, n: int = 6, strict: bool = False, wiki: bool = True) -> t
             if strict:
                 hits = relevant(hits, words)[:n]
             if hits:
-                return hits, name
+                return dated_hits(hits), name
             errors.append(f"{name}: nothing relevant")
         except (WebError, ValueError, KeyError) as e:
             errors.append(f"{name}: {e}")
@@ -412,7 +495,7 @@ def lookup(query: str, n: int = 4) -> tuple[list[dict], str, str]:
             except WebError:
                 break
             if found:
-                hits = (hits + [{"title": f"{p['title']} ({p['date'][:4]})", "url": p["url"],
+                hits = (hits + [{"title": p["title"], "url": p["url"], "date": fmt_date(p["date"]),
                                  "snippet": p["abstract"][:300]} for p in found])[:n]
                 engine = f"{engine}+arxiv" if engine else "arxiv"
                 break

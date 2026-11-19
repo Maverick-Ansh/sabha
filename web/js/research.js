@@ -593,13 +593,13 @@ export function createResearch() {
           cardsEl.appendChild(h('button.r-cardrow', { onclick: () => s.showDoc(c.title || c.id, `/api/research/card/${enc(c.id)}${q()}`, `https://arxiv.org/abs/${c.id}`) },
             h('div.r-cardrow-top', null, h('span.r-cardrow-title', null, c.title || c.id), h('span', { class: 'r-grade ' + (c.grade === 'ok' ? 'ok' : 'weak') }, c.grade || '?')),
             h('div.r-cardrow-line', null, c.one_line || ''),
-            h('div.r-row-sub', null, [c.id, fmtAgo(c.t), c.quote_pass != null ? `quotes ${Math.round(c.quote_pass * 100)}%` : null, c.repo ? 'code found' : null].filter(Boolean).join(' · '))));
+            h('div.r-row-sub', null, [c.published ? `published ${c.published}` : null, c.id, `read ${fmtAgo(c.t)}`, c.quote_pass != null ? `quotes ${Math.round(c.quote_pass * 100)}%` : null, c.repo ? 'code found' : null].filter(Boolean).join(' · '))));
         }
         if (!a.cards.length) cardsEl.appendChild(h('div.r-idle', null, 'No cards yet.'));
       }
       if (changed('queue', a.queue)) {
         clear(queueEl);
-        for (const x of a.queue) queueEl.appendChild(row('file', x.title, [x.id, x.via].filter(Boolean).join(' · ')));
+        for (const x of a.queue) queueEl.appendChild(row('file', x.title, [x.published ? `published ${x.published}` : null, x.id, x.via].filter(Boolean).join(' · ')));
         queueSec.hidden = !a.queue.length;
       }
       if (changed('events', a.events.map((e) => [e.t, e.kind, e.id]))) {

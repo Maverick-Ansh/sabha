@@ -23,6 +23,7 @@ import threading
 import time
 
 from . import live, llm
+from ..webtools import arxiv_month, fmt_date
 from .memory import Mission, append, now, read_jsonl, write
 
 NOTE_WORDS = 220
@@ -162,11 +163,16 @@ def add_wave(m: Mission, n: int, headline: str, cards: int) -> None:
     render(m)
 
 
+def published(c: dict) -> str:
+    """When the paper came out: its first arXiv version's date, else the month its id says ('' for neither)."""
+    return fmt_date(c.get("first_submitted")) or arxiv_month(c.get("id", ""))
+
+
 def _brief(c: dict) -> str:
     res = "; ".join(f"{r.get('metric')} = {r.get('value')} ({str(r.get('setting', ''))[:50]})" for r in c.get("results", [])[:4]
                     if str(r.get("value") or "").strip())
     lim = "; ".join(str(x.get("text", ""))[:110] for x in c.get("limitations", [])[:2])
-    return (f"[{c['id']}] {c.get('title', '')[:110]} | {c.get('one_line', '')[:200]} | method: "
+    return (f"[{c['id']}] {c.get('title', '')[:110]} | published {published(c) or 'unknown'} | {c.get('one_line', '')[:200]} | method: "
             f"{c.get('training_method', {}).get('text', '')[:180]} | architecture: {c.get('architecture', {}).get('text', '')[:140]}"
             f" | results: {res or 'none measured'} | limits: {lim or 'none stated'} | code: {_repo(c) or 'none'}")
 
@@ -214,6 +220,13 @@ def _repo(c: dict) -> str:
     return (r.get("url") or "") if r.get("status") == "verified" else ""
 
 
+def _day(ts) -> str:
+    try:
+        return time.strftime("%d %b %Y", time.strptime(str(ts), "%Y-%m-%dT%H:%M:%SZ")).lstrip("0")
+    except (TypeError, ValueError):
+        return ""
+
+
 def _hhmm(ts) -> str:
     try:
         return time.strftime("%H:%M", time.strptime(str(ts), "%Y-%m-%dT%H:%M:%SZ"))
@@ -237,7 +250,7 @@ def paper_md(c: dict, level: int = 3, full: bool = True) -> str:
     aid = c["id"]
     h = "#" * level
     L = [f"{h} {c.get('title', aid)}", "",
-         f"[{aid}] · first submitted {str(c.get('first_submitted') or '?')[:16]} · tracks {', '.join(c.get('tracks', []))}"
+         f"[{aid}] · **published {published(c) or 'date unknown'}** · tracks {', '.join(c.get('tracks', []))}"
          + (f" · [code]({_repo(c)})" if _repo(c) else "") + f" · [arXiv](https://arxiv.org/abs/{aid})", ""]
     if c.get("one_line"):
         L += [f"**In one line.** {c['one_line']}", ""]
@@ -295,6 +308,7 @@ def _render(m: Mission) -> str:
                 continue
             br = best_result(c)
             L += [f"### {when} · read [{c['id']}] {c.get('title', '')[:140]}", "",
+                  f"_Published {published(c) or 'date unknown'} · read {_day(e.get('ts'))} at {when} UTC_", "",
                   c.get("one_line", ""), ""]
             if br:
                 L += [f"- **Best number:** {br}"]
@@ -399,10 +413,10 @@ def pick_title(txt: str) -> str:
 
 
 def comparison_table(cards: list[dict], k: int = 14) -> str:
-    rows = ["| Paper | The idea | Best number | Code |", "|---|---|---|---|"]
+    rows = ["| Paper | Published | The idea | Best number | Code |", "|---|---|---|---|---|"]
     for c in cards[:k]:
         idea = " ".join(str(c.get("one_line", "")).replace("|", "/").split())[:150]
-        rows.append(f"| [{c['id']}] {' '.join(c.get('title', '').replace('|', '/').split())[:60]} | {idea} | "
+        rows.append(f"| [{c['id']}] {' '.join(c.get('title', '').replace('|', '/').split())[:60]} | {published(c) or '–'} | {idea} | "
                     f"{best_result(c).replace('|', '/')[:70] or '–'} | {'[repo](' + _repo(c) + ')' if _repo(c) else '–'} |")
     return "\n".join(rows)
 
@@ -434,6 +448,8 @@ def refine(m: Mission, ask=None) -> str:
             f"EARLIER DRAFTS (may name papers wrongly or repeat themselves; where they disagree with THE PAPERS, the papers win):\n"
             f"STATE OF KNOWLEDGE:\n{k[:3000] or '(none)'}\n\nSYNTHESIS DRAFT:\n{syn[:3000] or '(none)'}\n")
     rules = ("Rules: cite [arxiv_id] for every fact, only papers in THE PAPERS list, and call a paper only by its title there; "
+             "each paper carries its publication date: say when a result is old or newer work may have overtaken it, and "
+             "prefer the newer evidence when two papers disagree; "
              "numbers only from the papers' results; do not repeat a point you already made; say plainly where evidence is thin "
              "or missing; separate what was measured from what the authors believe. No preamble.")
     short = ask(m, "You write the opening of a finished research report: the answer, for someone who reads only this part.",

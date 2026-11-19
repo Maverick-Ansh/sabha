@@ -194,7 +194,7 @@ def chapter(m: Mission, w: dict, ended: float) -> tuple[str, str, int]:
         headline = (hm.group(1).strip().strip("*") if hm else f"{len(cards)} papers read in wave {n}")[:240]
         body = HEADLINE.sub("", txt, count=1).strip()
         body = re.sub(r"^#{1,2} (?!#)", "### ", body, flags=re.M)  # the chapter's own headings stay below its '## Wave' line
-        papers = "\n".join(f"- [{c['id']}] **{c.get('title', '')[:110]}**: {c.get('one_line', '')[:200]}"
+        papers = "\n".join(f"- [{c['id']}] **{c.get('title', '')[:110]}** ({NB.published(c) or 'date unknown'}): {c.get('one_line', '')[:200]}"
                            + (f" _{NB.best_result(c)}_" if NB.best_result(c) else "") for c in cards[:24])
         md = f"{head}\n\n**{headline}**\n\n{_strip_unknown_cites(m, body)}\n\n### Papers read in this wave\n\n{papers}\n"
     write(m.p("waves", f"w{n:02d}.md"), md)

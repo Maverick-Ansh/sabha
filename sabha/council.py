@@ -465,7 +465,8 @@ class CouncilManager:
             title = re.sub(r"\W+", " ", c["paper"]["title"]).lower().strip()
             hits = [h for h in hits if not (own and own.group(1) in h["url"])
                     and title not in re.sub(r"\W+", " ", h["title"]).lower()][:4]
-            body = ("\n".join(f"- [{h['title']}]({h['url']}): {h['snippet'][:260]}" for h in hits)
+            body = ("\n".join(f"- [{h['title']}]({h['url']})" + (f" ({h['date']})" if h.get("date") else "") + f": {h['snippet'][:260]}"
+                              for h in hits)
                     or "Nothing relevant came back for these keywords.")
         except (webtools.WebError, asyncio.TimeoutError) as e:
             engine, hits, body = "", [], f"The search did not work: {e or 'timed out'}"

@@ -467,7 +467,9 @@ def read_paper(m: Mission, aid: str, idx, budget: src.Budget, steer: dict, max_c
         m.mark(aid, state="failed", why=f"fetch: {str(e)[:160]}")
         trace.emit("result", f"could not fetch: {str(e)[:160]}", tool="fetch_paper", paper=aid, status="error")
         return "failed"
-    trace.emit("result", f"{meta['title']} · {len(paper['sections'])} sections, {len(paper['full'])} characters",
+    from .notebook import published
+    when = published({"id": aid, "first_submitted": meta.get("first_submitted")})
+    trace.emit("result", f"{meta['title']} · published {when or 'date unknown'} · {len(paper['sections'])} sections, {len(paper['full'])} characters",
                tool="fetch_paper", paper=aid, title=meta["title"])
     full = paper["full"]
     fullnorm = src.norm(full)
@@ -840,7 +842,8 @@ def rank_cards(m: Mission, tid: str) -> list[dict]:
 
 def _card_brief(c: dict, n_res: int = 3) -> str:
     res = "; ".join(f"{r.get('metric')} {r.get('value')} ({r.get('setting', '')[:60]})" for r in c.get("results", [])[:n_res])
-    return (f"[{c['id']}] {c['title'][:120]} ({c.get('first_submitted', '')}) | {c.get('one_line', '')[:220]} | type "
+    from .notebook import published
+    return (f"[{c['id']}] {c['title'][:120]} (published {published(c) or 'unknown'}) | {c.get('one_line', '')[:220]} | type "
             f"{','.join(c.get('model_type', []))} | train: {c.get('training_method', {}).get('text', '')[:200]} | losses: "
             f"{'; '.join((l.get('name') or '') + ' ' + (l.get('form') or '')[:80] for l in c.get('losses', [])[:3])} | results: {res} | "
             f"repo: {c.get('official_repo', {}).get('url')} [{c.get('official_repo', {}).get('status')}] | compute: "

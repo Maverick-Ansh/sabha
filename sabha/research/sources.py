@@ -193,8 +193,8 @@ def tavily(query: str, n: int = 5, domains: list[str] | None = None) -> list[dic
     PACE.wait("tavily", 1.0)
     raw, _, _ = wt.fetch("https://api.tavily.com/search", timeout=40, data=json.dumps(body).encode(),
                          headers={"Content-Type": "application/json"})
-    return [{"url": r.get("url", ""), "title": r.get("title", ""), "content": (r.get("content") or "")[:600]}
-            for r in json.loads(raw).get("results", [])]
+    return [{"url": r.get("url", ""), "title": r.get("title", ""), "content": (r.get("content") or "")[:600],
+             "date": wt.fmt_date(r.get("published_date"))} for r in json.loads(raw).get("results", [])]
 
 
 # ---------------------------------------------------------------- GitHub

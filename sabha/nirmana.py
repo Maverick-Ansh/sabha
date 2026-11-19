@@ -611,7 +611,8 @@ class Nirmana:
             q = short(prompt, 200)
             rec["model"] = "web search"
             hits, engine = await asyncio.to_thread(webtools.search, q, 6)
-            lines = [f"{k + 1}. **{h.get('title') or h.get('url')}** {h.get('url', '')}\n   {short(h.get('snippet') or '', 300)}"
+            lines = [f"{k + 1}. **{h.get('title') or h.get('url')}** {h.get('url', '')}"
+                     + (f" (published {h['date']})" if h.get("date") else "") + f"\n   {short(h.get('snippet') or '', 300)}"
                      for k, h in enumerate(hits)]
             out = (f"Search ({engine or 'none'}) for: {q}\n\n" + "\n".join(lines)) if lines else f"No results for: {q}"
             rec["output"] = out

@@ -353,7 +353,7 @@ export function openReport(opts = {}) {
     function tile(p) {
       const tr = p.tracks && p.tracks[0] ? trackOf(p.tracks[0]) : null;
       return h('button.rp-tile', { 'data-hue': p.hue || null, onclick: () => openCard(p.id) },
-        h('div.rp-tile-top', null, h('span.mono', null, p.id), p.submitted ? h('span.micro.dim', null, p.submitted.replace(/^\w{3}, /, '')) : null,
+        h('div.rp-tile-top', null, h('span.mono', null, p.id), p.published || p.submitted ? h('span.micro.dim', { title: 'Published' }, p.published || p.submitted.replace(/^\w{3}, /, '')) : null,
           h('span.spacer'), p.repo ? h('span.rp-badge', { title: 'Official code' }, 'code') : null, p.grade ? h('span.rp-badge.g', null, p.grade) : null),
         h('div.rp-tile-title', null, p.title || p.id),
         h('div.rp-tile-line', null, p.one_line),
@@ -378,6 +378,7 @@ export function openReport(opts = {}) {
       h('div.rp-peek-top', null, h('span.mono', null, aid), tr ? h('span.micro', null, tr.name) : null, h('span.spacer'),
         h('button.btn.ghost.sm.icon', { 'aria-label': 'Close', onclick: hidePeek }, icon('x', 14))),
       h('div.rp-peek-title', null, p ? p.title : 'A paper the team read'),
+      p && p.published ? h('div.rp-pub', null, 'Published ' + p.published) : null,
       p && p.one_line ? h('p.rp-peek-line', null, p.one_line) : null,
       p && p.best ? h('div.rp-best', null, h('i'), p.best) : null,
       p && p.limits && p.limits[0] ? h('p.rp-peek-lim', null, h('b', null, 'Limitation. '), p.limits[0]) : null,
@@ -419,7 +420,7 @@ export function openReport(opts = {}) {
     const kind = st.tab === 'notebook' ? 'notebook' : 'report';
     let text = st.docs[kind] && st.docs[kind].md;
     if (st.tab === 'papers') {
-      text = '# Papers\n\n' + Array.from(st.papers.values()).map((p) => `- [${p.id}] **${p.title}**: ${p.one_line}${p.best ? ' (' + p.best + ')' : ''} https://arxiv.org/abs/${p.id}`).join('\n') + '\n';
+      text = '# Papers\n\n' + Array.from(st.papers.values()).map((p) => `- [${p.id}] **${p.title}** (published ${p.published || 'date unknown'}): ${p.one_line}${p.best ? ' (' + p.best + ')' : ''} https://arxiv.org/abs/${p.id}`).join('\n') + '\n';
     }
     if (!text) { toast('Nothing to download yet', { tone: 'sun' }); return; }
     const o = ov();

@@ -189,6 +189,7 @@ html.rp-open { overflow: hidden; }
 .rp-peek::before { content: ""; position: absolute; inset: 0 0 auto; height: 3px; border-radius: 20px 20px 0 0; background: var(--hue, var(--lilac)); opacity: .8; }
 .rp-peek-top { display: flex; align-items: center; gap: 8px; color: var(--ink-3); }
 .rp-peek-title { font: 640 17px/1.3 var(--f-display); letter-spacing: -.015em; }
+.rp-pub { font: 600 12px var(--f-ui); color: var(--ink-2); margin-top: -4px; }
 .rp-peek-line, .rp-peek-lim { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
 .rp-peek-lim { font-size: 13px; }
 .rp-peek-act { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 2px; }
