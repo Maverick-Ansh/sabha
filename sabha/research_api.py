@@ -545,6 +545,7 @@ class Research:
             try:
                 m = Mission(root)
                 NB.backfill(m)
+                NB.render(m)
                 NB.refine(m)
                 W.render_report(m, final=True)
                 st["done"] = time.time()
