@@ -240,12 +240,24 @@ def secret(name: str) -> str:
 
 def import_secrets() -> list[str]:
     """Copy optional secrets into empty fields of settings.json. Returns the names that were filled."""
+    # Each lookup in Colab pops a "Secrets access" dialog, and a secret the owner never set stays empty, so without
+    # this every run of the cell asked ~20 times (seen on a real box). Look each name up once per box session;
+    # SABHA_RECHECK_SECRETS=1 looks again (after adding a secret).
+    checked_p = os.path.join(RUN, "secrets_checked.json")
+    checked = set() if os.environ.get("SABHA_RECHECK_SECRETS") == "1" else set(read_json(checked_p, []) or [])
+    tried = []
+
+    def secret_once(name: str) -> str:
+        if name in checked and not os.environ.get(name):
+            return ""
+        tried.append(name)
+        return secret(name)
     cur = read_json(SETTINGS, {}) or {}
     got = []
     for name, field in SECRET_NAMES.items():
         if cur.get(field):
             continue
-        v = secret(name)
+        v = secret_once(name)
         if v:
             cur[field] = v
             got.append(name)
@@ -256,7 +268,7 @@ def import_secrets() -> list[str]:
     for name, (ch, field) in NOTIFY_SECRETS.items():
         if (note.get(ch) or {}).get(field):
             continue
-        v = secret(name)
+        v = secret_once(name)
         if v:
             note.setdefault(ch, {})[field] = v
             n_got.append(name)
@@ -264,6 +276,12 @@ def import_secrets() -> list[str]:
         if (note.get("call") or {}).get("telegram_user") and not (note["call"].get("twilio_sid")):
             note["call"].setdefault("provider", "telegram")
         write_json(NOTIFY, note, 0o600)
+    if tried:
+        try:
+            os.makedirs(RUN, exist_ok=True)
+            write_json(checked_p, sorted(checked | set(tried)))
+        except OSError:
+            pass
     return got + n_got
 
 
