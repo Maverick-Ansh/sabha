@@ -49,15 +49,27 @@ def _md_of(v, level: int = 2) -> str:
     if isinstance(v, str):
         return v.strip()
     if isinstance(v, list):
-        rows = []
+        rows, headed = [], False
         for x in v:
-            if isinstance(x, dict):
-                bits = [str(y).strip() for y in x.values() if isinstance(y, (str, int, float)) and str(y).strip()]
-                rows.append("- " + " · ".join(bits))
+            if isinstance(x, dict) and x:
+                keys = list(x)
+                tk = next((k for k in keys if k.lower() in TITLE_KEYS), None)
+                if tk is None and isinstance(x[keys[0]], str) and len(x[keys[0]]) < 120 and len(keys) > 1:
+                    tk = keys[0]
+                if tk:  # an experiment, a finding: its own heading, the other fields as labelled bullets
+                    headed = True
+                    rest = [f"- **{k.replace('_', ' ').strip().capitalize()}**: {_inline(y, level)}"
+                            for k, y in x.items() if k != tk and _md_of(y, level + 1)]
+                    rows.append(f"{'#' * min(level, 6)} {' '.join(str(x[tk]).split())}\n\n" + "\n".join(rest))
+                else:
+                    bits = [str(y).strip() for y in x.values() if isinstance(y, (str, int, float)) and str(y).strip()]
+                    rows.append("- " + " · ".join(bits))
             else:
                 rows.append("- " + " ".join(_md_of(x, level + 1).split()))
-        return "\n".join(rows)
+        return ("\n\n" if headed else "\n").join(rows)
     if isinstance(v, dict):
+        if len(v) == 1 and isinstance(next(iter(v.values())), (list, dict)):
+            return _md_of(next(iter(v.values())), level)  # {"experiments": [...]}: the list is the content
         parts = []
         for k, x in v.items():
             body = _md_of(x, level + 1)
@@ -73,6 +85,14 @@ def _md_of(v, level: int = 2) -> str:
     return "" if v is None else str(v)
 
 
+TITLE_KEYS = ("name", "title", "experiment", "heading", "finding", "headline")
+
+
+def _inline(y, level: int) -> str:
+    """One field's value on one line: a list of ids becomes [id], [id]."""
+    if isinstance(y, list) and all(isinstance(z, (str, int, float)) for z in y):
+        return ", ".join(f"[{z}]" if re.fullmatch(r"\d{4}\.\d{4,5}", str(z).strip()) else str(z).strip() for z in y)
+    return " ".join(_md_of(y, level + 1).split())
 FENCE = re.compile(r"```[ \t]*(?:json|JSON)?[ \t]*\n(.*?)(?:```|\Z)", re.S)
 KEYVAL = re.compile(r'"(\w+)"\s*:\s*(\[\s*"|")')
 
@@ -203,10 +223,12 @@ def _hhmm(ts) -> str:
 
 def best_result(c: dict) -> str:
     for r in c.get("results", []):
-        v = str(r.get("value") or "").strip()
+        v = str(r.get("value") or "").strip().strip(",;")
         if v and re.search(r"\d", v):
             metric = str(r.get("metric") or "").replace("_", " ").strip()
-            return f"{metric} {v}".strip() + (f" ({str(r.get('setting'))[:40]})" if r.get("setting") else "")
+            head = metric if re.sub(r"[^\d.]", "", v) and re.sub(r"[^\d.]", "", v) in re.sub(r"[^\d.]", " ", metric).split() else f"{metric} {v}"
+            setting = str(r.get("setting") or "").replace("_", " ").strip()
+            return head.strip() + (f" ({setting[:40]})" if setting else "")
     return ""
 
 
@@ -412,6 +434,12 @@ def refine(m: Mission, ask=None) -> str:
                          "with a short name, then bullets: **Hypothesis**, **Setup** (model size, data, what changes between "
                          "arms, what it costs on one or two consumer or cloud GPUs), **Measure**, **What would change our mind**, "
                          "**Builds on** [ids]. Prefer cheap, decisive experiments over big ones.\n" + rules, 1700)
+    title = ask(m, "You name finished research reports. Answer with the title only.",
+                f"THE QUESTION:\n{q[:1500]}\n\nTHE ANSWER:\n{short[:1500]}\n\nGive this report a title: 4 to 10 words, plain and "
+                "specific, like a good paper or essay title. No quotes, no markdown, no colon-separated subtitle unless it helps.", 40)
+    title = " ".join(re.sub(r"[#*_`\"]", "", (title or "").strip().splitlines()[0] if (title or "").strip() else "").split()).strip(" .'")
+    if 8 <= len(title) <= 120 and not title.startswith("(") and "could not be written" not in title:
+        write(m.p("state", "report_title.txt"), title + "\n")
     from .waves import knowledge_from_ledgers
     sections = {}
     for src_md in (knowledge_from_ledgers(m, ""), re.sub(r"^# .*\n", "", k)):  # the model's state wins; the ledgers fill gaps

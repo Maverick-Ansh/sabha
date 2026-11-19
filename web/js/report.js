@@ -3,7 +3,7 @@
 // (NOTEBOOK.md: every paper as it was read and every note the model wrote) and Papers (every card, as a shelf).
 // Citations like [2505.11893] become chips with the paper's short name; a chip opens a peek with the paper's line,
 // its best number and its card. Sections get a table of contents with scroll spy. Download (.md) and Print (PDF).
-import { h, icon, clear, setText } from './dom.js';
+import { h, icon, clear, setText, append } from './dom.js';
 import { get, post, enc } from './api.js';
 import { renderInto } from './md.js';
 import { fmtAgo } from './format.js';
@@ -22,13 +22,16 @@ const slug = (s, used) => {
   return k;
 };
 // "RLAP: A Reinforcement ..." -> "RLAP"; "UniZero: Generalized ..." -> "UniZero"; else the first words
+const STOP = new Set(['a', 'an', 'the', 'of', 'for', 'with', 'in', 'on', 'to', 'and', 'or', 'by', 'from', 'via', 'at', 'as', 'is', 'do', 'does']);
 function shortName(title, aid) {
   const t = String(title || '').trim();
   if (!t) return aid;
-  const c = t.split(/:\s/)[0];
-  if (c.length <= 22 && c !== t) return c;
-  const w = t.split(/\s+/).slice(0, 3).join(' ');
-  return w.length > 26 ? w.slice(0, 25) + '…' : w;
+  const c = t.split(/:\s*/)[0].trim();
+  if (c.length <= 22 && c !== t && c) return c;
+  const w = t.split(/\s+/).slice(0, 4);
+  while (w.length > 1 && STOP.has(w[w.length - 1].toLowerCase())) w.pop();
+  const s = w.join(' ');
+  return s.length > 30 ? s.slice(0, 29) + '…' : s;
 }
 const SECTION_KIND = [
   [/^the answer/i, 'answer'], [/^key findings/i, 'findings'], [/^how the papers compare|^papers so far/i, 'compare'],
@@ -141,13 +144,42 @@ export function openReport(opts = {}) {
     }
   }
 
+  // A small model writes "1. **finding**" then the evidence as loose paragraphs, so every item is its own list
+  // (all numbered 1). Rebuild: one card per finding, numbered in order, its evidence inside it.
+  function findings(sec) {
+    let n = 0, card = null;
+    for (const k of Array.from(sec.children)) {
+      if (k.tagName === 'H2') continue;
+      if (k.tagName === 'OL' || k.tagName === 'UL') {
+        const items = Array.from(k.children).filter((x) => x.tagName === 'LI');
+        if (k.tagName === 'UL' && card) { card.appendChild(k); continue; }
+        for (const li of items) {
+          n += 1;
+          card = h('div.rp-finding', null, h('span.rp-fn', { 'aria-hidden': 'true' }, String(n).padStart(2, '0')));
+          const head = h('div.rp-fhead');
+          while (li.firstChild) head.appendChild(li.firstChild);
+          card.appendChild(head);
+          sec.insertBefore(card, k);
+        }
+        k.remove();
+        continue;
+      }
+      if (card) card.appendChild(k);
+    }
+  }
+
   function citeChips(el) {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode: (n) => (n.parentElement.closest('code, pre, a, .rp-cite') ? NodeFilter.FILTER_REJECT : CITE_ONE.test(n.data) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
     });
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
+    const seen = new Map();  // block element -> paper ids already chipped in it
     for (const n of nodes) {
+      const block = n.parentElement.closest('p, li, td, th, h1, h2, h3, h4, blockquote') || el;
+      const compact = !!n.parentElement.closest('h3, h4, td, th');  // beside the paper's own title: the id is enough
+      if (!seen.has(block)) seen.set(block, new Set());
+      const here = seen.get(block);
       const frag = document.createDocumentFragment();
       let last = 0;
       const s = n.data;
@@ -159,9 +191,11 @@ export function openReport(opts = {}) {
           const aid = m[1];
           const p = st.papers.get(aid);
           const tr = p && p.tracks && p.tracks[0] ? trackOf(p.tracks[0]) : null;
-          frag.appendChild(h('button.rp-cite', { type: 'button', 'data-hue': (p && p.hue) || (tr && tr.hue) || null, 'data-aid': aid,
-            title: p ? p.title : aid, onclick: (e) => { e.stopPropagation(); peek(aid, e.currentTarget); } },
-          p ? shortName(p.title, aid) : aid));
+          const again = here.has(aid);
+          here.add(aid);
+          frag.appendChild(h('button.rp-cite' + (again ? '.again' : compact ? '.id' : ''), { type: 'button', 'data-hue': (p && p.hue) || (tr && tr.hue) || null,
+            'data-aid': aid, title: p ? p.title : aid, 'aria-label': p ? p.title : aid, onclick: (e) => { e.stopPropagation(); peek(aid, e.currentTarget); } },
+          again ? '' : compact || !p ? aid : shortName(p.title, aid)));
         } else frag.appendChild(h('span.rp-cite.bad', { title: 'The model cited a paper the team never read: the citation was removed' }, 'unverified'));
         last = re.lastIndex;
       }
@@ -202,10 +236,11 @@ export function openReport(opts = {}) {
           w.appendChild(d);
         }
       }
+      if (k === 'findings') findings(s.el);
       if (k === 'answer') {
         for (const p of s.el.querySelectorAll('p')) {
           const mm = p.textContent.match(/^\s*Confidence:\s*(high|medium|low)\b[,:\s]*(.*)$/i);
-          if (mm) { p.className = 'rp-conf'; p.dataset.level = mm[1].toLowerCase(); clear(p).append(h('b', null, mm[1] + ' confidence'), mm[2] ? h('span', null, mm[2].replace(/^because\s*/i, 'because ')) : null); }
+          if (mm) { p.className = 'rp-conf'; p.dataset.level = mm[1].toLowerCase(); append(clear(p), [h('b', null, mm[1] + ' confidence'), mm[2] ? h('span', null, mm[2].replace(/^because\s*/i, 'because ')) : null]); }
         }
       }
     }
@@ -308,7 +343,7 @@ export function openReport(opts = {}) {
     peekEl.classList.remove('wide');
     peekEl.dataset.hue = (p && p.hue) || '';
     const tr = p && p.tracks && p.tracks[0] ? trackOf(p.tracks[0]) : null;
-    peekEl.append(
+    append(peekEl, [
       h('div.rp-peek-top', null, h('span.mono', null, aid), tr ? h('span.micro', null, tr.name) : null, h('span.spacer'),
         h('button.btn.ghost.sm.icon', { 'aria-label': 'Close', onclick: hidePeek }, icon('x', 14))),
       h('div.rp-peek-title', null, p ? p.title : 'A paper the team read'),
@@ -318,7 +353,7 @@ export function openReport(opts = {}) {
       h('div.rp-peek-act', null,
         h('button.btn.sm.brand', { onclick: () => openCard(aid) }, icon('file', 13), 'Read the card'),
         h('a.btn.sm', { href: `https://arxiv.org/abs/${aid}`, target: '_blank', rel: 'noopener noreferrer' }, 'arXiv'),
-        p && p.repo ? h('a.btn.sm', { href: p.repo, target: '_blank', rel: 'noopener noreferrer' }, 'Code') : null));
+        p && p.repo ? h('a.btn.sm', { href: p.repo, target: '_blank', rel: 'noopener noreferrer' }, 'Code') : null)]);
     peekEl.hidden = false;
     if (narrow() || !anchor) { peekEl.style.left = peekEl.style.top = ''; peekEl.classList.add('sheet'); return; }
     peekEl.classList.remove('sheet');

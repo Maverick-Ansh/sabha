@@ -439,7 +439,10 @@ def _demote(md: str, by: int = 1) -> str:
     return re.sub(r"^(#{1,5}) ", lambda mm: "#" * min(len(mm.group(1)) + by, 6) + " ", md, flags=re.M)
 
 
-def _title(m: Mission) -> str:
+def _title(m: Mission, final: bool = False) -> str:
+    t = _read(m.p("state", "report_title.txt"), 300).strip() if final else ""
+    if t:  # the refined report's own title (the brief's is the first line of the question)
+        return t
     brief = _read(m.p("brief.md"), 3000)
     tm = re.search(r"^title:\s*(.+)$", brief, re.M) or re.search(r"^#\s+(.+)$", brief, re.M)
     return tm.group(1).strip() if tm else m.id
@@ -454,7 +457,7 @@ def render_report(m: Mission, final: bool = False) -> str:
 
 
 def _render_report(m: Mission, final: bool = False) -> str:
-    title = _title(m)
+    title = _title(m, final)
     chapters = sorted(glob.glob(m.p("waves", "w*.md")))
     cards = [c for c in m.cards()]
     q = question_of(m, 1600)

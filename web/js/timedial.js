@@ -12,7 +12,7 @@ const PRESETS = [[30, '30 min'], [60, '1 h'], [90, '1 h 30'], [120, '2 h'], [240
 
 const posOf = (min) => Math.log(min / MIN_M) / Math.log(MAX_M / MIN_M);
 const minOf = (p) => MIN_M * Math.pow(MAX_M / MIN_M, Math.min(Math.max(p, 0), 1));
-const step = (min) => (min < 60 ? 5 : min < 180 ? 15 : 30);
+const step = (min) => (min < 180 ? 5 : min < 360 ? 15 : 30);
 const snap = (min) => { const s = step(min); return Math.min(MAX_M, Math.max(MIN_M, Math.round(min / s) * s)); };
 const rad = (deg) => (deg - 90) * Math.PI / 180;
 const pt = (deg, r = R) => [C + r * Math.cos(rad(deg)), C + r * Math.sin(rad(deg))];
@@ -86,8 +86,8 @@ export function createTimeDial(opts = {}) {
   const stripNote = h('div.td-strip-note');
   const el = h('div.td', null, dial, h('div.td-side', null, h('div.td-chips', null, chips), h('div.td-plan', null, h('div.micro', null, 'how the time is spent'), strip, stripNote)));
 
-  function set(m, commit) {
-    if (m) { min = snap(m); last = min; } else min = 0;
+  function set(m, commit, exact) {
+    if (m) { min = exact ? Math.min(MAX_M, Math.max(MIN_M, Math.round(m))) : snap(m); last = min; } else min = 0;
     paint();
     if (commit && opts.onChange) opts.onChange(min / 60);
   }
@@ -192,7 +192,7 @@ export function createTimeDial(opts = {}) {
     const v = parseLen(input.value);
     input.hidden = true; valueBtn.hidden = false;
     input.classList.remove('bad');
-    if (commit && v != null) set(Math.min(MAX_M, Math.max(MIN_M, v)), true);
+    if (commit && v != null) set(v, true, true);
     dial.focus();
   }
   input.addEventListener('keydown', (e) => {
@@ -206,7 +206,7 @@ export function createTimeDial(opts = {}) {
   return {
     el,
     get hours() { return min / 60; },
-    set hours(v) { if (!dragging && !editing) { min = v > 0 ? snap(v * 60) : 0; if (min) last = min; paint(); } },
+    set hours(v) { if (!dragging && !editing) { min = v > 0 ? Math.min(MAX_M, Math.max(MIN_M, Math.round(v * 60))) : 0; if (min) last = min; paint(); } },
     refresh: paintPlan,
   };
 }

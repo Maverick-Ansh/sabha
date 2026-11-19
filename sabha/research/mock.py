@@ -167,6 +167,8 @@ def main() -> int:
         ids = done_cards or ["2301.08243"]
         if "opening" in system:
             return f"A demo answer built from {len(ids)} papers, led by [{ids[0]}].\n\nConfidence: low, because this is a demo run."
+        if "name finished research reports" in system:
+            return "World models that help a policy plan (demo)"
         if "key findings" in system:
             return "\n".join(f"{i}. **Demo finding {i}.** From [{x}]." for i, x in enumerate(ids[:3], 1))
         return f"### Demo experiment\n\n- **Hypothesis**: it plans better.\n- **Builds on** [{ids[0]}]"

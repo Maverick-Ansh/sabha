@@ -102,7 +102,16 @@ html.rp-open { overflow: hidden; }
 .rp-conf[data-level="low"] { background: rgba(var(--coral-rgb), .08); border-color: rgba(var(--coral-rgb), .25); }
 .rp-conf[data-level="low"] b { color: var(--coral-deep); }
 
-/* key findings: big numerals */
+/* key findings: one card each, big numerals */
+.rp-finding { position: relative; margin: 14px 0; padding: 18px 20px 12px 66px; border-radius: 20px; background: rgba(var(--glass-rgb), .6); border: 1px solid var(--line); }
+.rp-finding > p, .rp-finding > ul { margin: .5em 0; font-size: 15px; color: var(--ink-2); }
+.rp-fhead { font-size: 16.5px; line-height: 1.5; }
+.rp-fhead strong:first-child { font: 650 17.5px/1.4 var(--f-display); letter-spacing: -.01em; }
+.rp-fn { position: absolute; left: 20px; top: 17px; font: 700 23px/1 var(--f-display); letter-spacing: -.04em;
+  background: var(--brand); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.rp-cite.id { font-family: var(--f-mono); font-weight: 500; max-width: none; }
+.rp-cite.again { width: 1.15em; padding: 0; justify-content: center; border-radius: 50%; }
+.rp-cite.again::after { content: ""; width: .38em; height: .38em; border-radius: 50%; background: currentColor; }
 .rp-sec[data-kind="findings"] > ol { list-style: none; counter-reset: f; padding: 0; display: flex; flex-direction: column; gap: 14px; }
 .rp-sec[data-kind="findings"] > ol > li { counter-increment: f; position: relative; padding: 16px 18px 16px 64px; border-radius: 18px;
   background: rgba(var(--glass-rgb), .6); border: 1px solid var(--line); }
@@ -208,6 +217,8 @@ html.rp-open { overflow: hidden; }
   .rp-sec { padding-top: 30px; scroll-margin-top: 56px; }
   .rp-sec[data-kind="answer"] > :not(h2) { font-size: 17px; }
   .rp-sec[data-kind="findings"] > ol > li { padding: 14px 14px 14px 52px; }
+  .rp-finding { padding: 15px 15px 10px 50px; border-radius: 18px; }
+  .rp-fn { left: 14px; top: 15px; font-size: 19px; }
   .rp-sec[data-kind="findings"] > ol > li::before { left: 14px; font-size: 19px; }
   .rp-exp, .rp-paper, .rp-entry { padding: 15px 15px 11px; border-radius: 18px; }
   .rp-exp li strong:first-child { display: block; min-width: 0; }
