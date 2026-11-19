@@ -61,7 +61,7 @@ export function createSidebar(opts = {}) {
   addEventListener('resize', apply);
   apply();
 
-  function item(e, snippet, words) {
+  function item(e, snippet = '', words = []) {
     const running = e.live_mission && e.status === 'running';
     const on = opts.activeId && (opts.activeId() === e.live_mission && e.live_mission);
     const when = ts(e) ? new Date(ts(e)).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
