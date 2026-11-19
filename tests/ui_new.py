@@ -52,16 +52,16 @@ async def main(a):
                         await page.wait_for_timeout(4500)
                         if sz == "d":
                             hx = page.locator(".rz-x").first
-                            b = await hx.bounding_box()
-                            await page.mouse.move(b["x"] + 5, b["y"] + b["height"] / 2)
+                            bx = await hx.bounding_box()
+                            await page.mouse.move(bx["x"] + 5, bx["y"] + bx["height"] / 2)
                             await page.mouse.down()
-                            await page.mouse.move(b["x"] - 220, b["y"] + b["height"] / 2, steps=8)
+                            await page.mouse.move(bx["x"] - 220, bx["y"] + bx["height"] / 2, steps=8)
                             await page.mouse.up()
                             hy = page.locator(".rz-y").first
-                            b = await hy.bounding_box()
-                            await page.mouse.move(b["x"] + b["width"] / 2, b["y"] + 5)
+                            bx = await hy.bounding_box()
+                            await page.mouse.move(bx["x"] + bx["width"] / 2, bx["y"] + 5)
                             await page.mouse.down()
-                            await page.mouse.move(b["x"] + b["width"] / 2, b["y"] - 120, steps=8)
+                            await page.mouse.move(bx["x"] + bx["width"] / 2, bx["y"] - 120, steps=8)
                             await page.mouse.up()
                             await page.wait_for_timeout(800)
                             await snap("pf_watch_wide")
