@@ -46,6 +46,47 @@ async def main(a):
                         await snap(name)
                     await ctx.close()
                     continue
+                if a.only == "report":  # the run-length dial, then the report reader: top, a citation peek, findings, notebook, papers
+                    try:
+                        await page.goto(a.base + "#/research" + tok)
+                        await page.wait_for_timeout(4500)
+                        dial = page.locator(".td").first
+                        if await dial.count():
+                            await dial.scroll_into_view_if_needed()
+                            await page.wait_for_timeout(500)
+                            await dial.screenshot(path=os.path.join(a.out, f"{a.tag}_{theme}_{sz}_dial.jpg"), type="jpeg", quality=75)
+                            await page.locator(".td-value").first.click(timeout=3000)
+                            await page.keyboard.type("1h 40m")
+                            await page.keyboard.press("Enter")
+                            await page.wait_for_timeout(600)
+                            await dial.screenshot(path=os.path.join(a.out, f"{a.tag}_{theme}_{sz}_dial2.jpg"), type="jpeg", quality=75)
+                        await page.mouse.wheel(0, -3000)
+                        await page.locator(".r-actions .btn.brand").first.click(timeout=4000)
+                        await page.wait_for_timeout(3500)
+                        await snap("rp_top")
+                        cite = page.locator(".rp-cite[data-aid]").first
+                        if await cite.count():
+                            await cite.scroll_into_view_if_needed()
+                            await cite.click(timeout=3000)
+                            await page.wait_for_timeout(900)
+                            await snap("rp_peek")
+                            await page.keyboard.press("Escape")
+                        for sec in ("findings", "compare", "exps", "dossier"):
+                            loc = page.locator(f'.rp-sec[data-kind="{sec}"]').first
+                            if await loc.count():
+                                await loc.evaluate("e => e.scrollIntoView({block: 'start'})")
+                                await page.wait_for_timeout(700)
+                                await snap("rp_" + sec)
+                        await page.locator('.rp-tabs button[data-tab="notebook"]').click(timeout=3000)
+                        await page.wait_for_timeout(2500)
+                        await snap("rp_notebook")
+                        await page.locator('.rp-tabs button[data-tab="papers"]').click(timeout=3000)
+                        await page.wait_for_timeout(2000)
+                        await snap("rp_papers")
+                    except Exception as e:
+                        errors.append(f"{where}: report: {str(e)[:200]}")
+                    await ctx.close()
+                    continue
                 if a.only == "nirmana":  # the workshop: instruments, the load sheet, a flow run live and finished
                     try:
                         await page.goto(a.base + "#/nirmana" + tok)
