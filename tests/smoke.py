@@ -837,6 +837,20 @@ async def main() -> int:
               and all(p.get("hue") and p.get("title") for p in pp["papers"]) and len(pp.get("tracks") or []) == 3, str(pp)[:300])
         st, r = await api.call("POST", "/api/research/refine", {"mission": cmid})
         check("report: refine needs a model (409 in demo)", st == 409, str(r)[:200])
+        st, lib = await api.call("GET", "/api/library")
+        row = next((e for e in lib.get("entries") or [] if e.get("live_mission") == cmid), {}) if st == 200 else {}
+        check("library: every run on the box is listed, not kept yet", row and not row.get("saved_at") and row.get("papers", 0) >= 4
+              and lib["github"]["on"] is False, str(lib)[:300])
+        st, kept = await api.call("POST", "/api/library/save", {"mission": cmid, "html": "<!doctype html><html><body>kept page</body></html>"})
+        check("library: keep a report", st == 200 and kept.get("lid", "").endswith(cmid) and kept.get("saved_at"), str(kept)[:300])
+        st, bad = await api.call("POST", "/api/library/save", {"mission": cmid, "html": "not a page"})
+        check("library: only a page is kept", st == 400)
+        async with http.get(f"{base}/api/library/{kept.get('lid', 'x')}/html?token={TOKEN}") as resp:
+            page = await resp.text()
+        check("library: the kept page opens in a new tab (token in the link)", resp.status == 200 and "kept page" in page
+              and resp.content_type == "text/html", page[:200])
+        st, lib = await api.call("GET", "/api/library")
+        check("library: the run now shows as kept", any(e.get("lid") == kept.get("lid") and e.get("saved_at") for e in lib.get("entries") or []))
         outbox = [json.loads(x) for x in (croot / "state" / "notify.jsonl").read_text("utf-8").splitlines()]
         check("continuous: the notify outbox has the waves and the end", [x["kind"] for x in outbox][-1] == "done"
               and sum(1 for x in outbox if x["kind"] == "wave") >= 2, str(outbox)[:300])

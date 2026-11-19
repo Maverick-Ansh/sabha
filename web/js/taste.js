@@ -72,7 +72,8 @@ export function createTaste({ onChange } = {}) {
     setText(startBtn.lastChild, mode === 'instant' ? 'Start instant research' : 'Start continuous research');
   }
   const toggleBtn = h('button.btn.ghost.sm', { onclick: () => { open = !open; paint(); } });
-  const head = h('div.r-card-head', null, h('h2.r-h2', null, 'Your research'), h('span.spacer'), toggleBtn);
+  const headTitle = h('h2.r-h2', null, 'Your research');
+  const head = h('div.r-card-head', null, headTitle, h('span.spacer'), toggleBtn);
   const el = h('section.card.r-card.t-card', null, head, runStrip, form);
 
   // ---------- data ----------
@@ -139,6 +140,7 @@ export function createTaste({ onChange } = {}) {
   // ---------- paint ----------
   function paint() {
     form.hidden = !open;
+    setText(headTitle, running ? 'Your research' : lastRun ? 'Start a new research' : 'Your research');
     toggleBtn.textContent = open ? 'Hide' : (running ? 'Your taste' : 'New run');
     startBtn.disabled = running;
     startBtn.title = running ? 'One run at a time: finish or stop the current one first' : '';
@@ -164,7 +166,15 @@ export function createTaste({ onChange } = {}) {
     }
     paint();
   }
+  // The hero's New research button: open the form, bring it into view, put the cursor in the question.
+  function focusForm() {
+    open = true;
+    paint();
+    el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    el.classList.remove('t-glow'); void el.offsetWidth; el.classList.add('t-glow');
+    setTimeout(() => { topicIn.focus(); topicIn.select(); }, 450);
+  }
   paint();
   paintMode();
-  return { el, update, download };
+  return { el, update, download, focusForm, get running() { return running; } };
 }

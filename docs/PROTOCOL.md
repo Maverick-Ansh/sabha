@@ -653,3 +653,25 @@ paper brief a model reads (the refine prompt asks it to say when a result is old
 `Published: <date>` first when the page declares one (meta tags, JSON-LD `datePublished`, `<time datetime>`). Talk's
 `web_search`/`read_page`, the council's lookups and Nirmana's search stage show it.
 
+
+## 17. The research library (`sabha/library.py`, `web/js/library.js`)
+
+The Research view has two tabs: **Research** (the run on screen, with a **New research** button that opens the
+question form whenever no run is going) and **Library** (every research, newest first, as covers).
+
+A finished report is kept the moment the reader shows it: the reader posts its standalone page (the same one Save
+page downloads, which follows the viewer's light or dark preference) and the hub stores `report.html`, `report.md`,
+`notebook.md` and `meta.json` in `<data>/library/<lid>/`, where `lid` = the mission's start date + its id (a new box
+numbers missions from 001 again; the date keeps them apart). With a GitHub repository and token (settings `git_repo`
++ `git_token`, the Library's Connect form, or the `SABHA_GIT_REPO` / `SABHA_GIT_TOKEN` secrets) the same files go to
+`library/<lid>/` in that repository through the contents API, and `library/index.json` lists them. A fresh box reads
+that index, so reports from earlier boxes stay in the Library and open from GitHub.
+
+| Method & path | Body | Returns |
+|---|---|---|
+| `GET /api/library` | | `{ entries: [...], github: { on, repo, error } }` |
+| `POST /api/library/save` | `{ mission, html }` | the entry; `pushing: true` while it goes to GitHub |
+| `GET /api/library/{lid}/html[?token=T]` | | the kept page (`text/html`); the token may ride in the link so it opens in a new tab |
+
+Entry fields: `lid, mission, title, question, one_line, started, papers, waves, tracks, hours, status, final, saved_at,
+digest, on_box, in_github, live_mission` (set when the run's folder is on this box: the cover opens the live reader).

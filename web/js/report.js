@@ -8,6 +8,7 @@ import { get, post, enc } from './api.js';
 import { renderInto } from './md.js';
 import { fmtAgo } from './format.js';
 import { toast } from './notify.js';
+import { keepReport } from './library.js';
 
 const POLL_MS = 30000;
 const CITE = /\[(\d{4}\.\d{4,5})(?:v\d+)?\]|\[unverified citation removed\]/g;
@@ -88,9 +89,10 @@ export function openReport(opts = {}) {
   const dlBtn = h('button.btn.sm.ghost', { title: 'Download this page as markdown', onclick: () => download() }, icon('down', 14), h('span.rp-hide-s', null, '.md'));
   const pageBtn = h('button.btn.sm.ghost', { title: 'Save the page as one .html file that looks exactly like this (opens in any browser, offline)', onclick: () => savePage() }, icon('layers', 14), h('span.rp-hide-s', null, 'Page'));
   const printBtn = h('button.btn.sm.ghost', { title: 'Save as PDF: every page, in this look (choose "Save as PDF" in the print dialog)', onclick: () => print() }, icon('file', 14), h('span.rp-hide-s', null, 'PDF'));
+  const keptEl = h('span.rp-kept', { hidden: true });
   const closeBtn = h('button.btn.ghost.icon', { title: 'Close (Esc)', 'aria-label': 'Close the report', onclick: () => api.close() }, icon('x', 18));
   const barTitle = h('div.rp-bar-title.ellipsis');
-  const bar = h('header.rp-bar', null, closeBtn, barTitle, tabs, h('div.rp-bar-act', null, refineBtn, dlBtn, pageBtn, printBtn));
+  const bar = h('header.rp-bar', null, closeBtn, barTitle, tabs, h('div.rp-bar-act', null, keptEl, refineBtn, dlBtn, pageBtn, printBtn));
   const scroll = h('div.rp-scroll');
   const peekEl = h('div.rp-peek', { hidden: true, role: 'dialog', 'aria-label': 'Paper' });
   const root = h('div.rp', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Research report' }, bar, scroll, peekEl);
@@ -327,6 +329,21 @@ export function openReport(opts = {}) {
         : 'Every number comes from a quote in the paper (open a citation, then Read the card). Citations the team never read are marked unverified.'));
     clear(scroll).appendChild(h('div.rp-wrap', null, h('div.rp-layout', null, toc(secs), article)));
     scroll.scrollTop = top;
+    if (kind === 'report') keep();
+  }
+  // A finished report goes into the library (and GitHub when connected) the moment it is shown: no save button.
+  async function keep() {
+    const o = ov();
+    const m = o && o.mission;
+    if (st.kept || !m || m.status !== 'done' || !m.has_final) return;
+    st.kept = true;
+    const d = standalone(true);
+    if (!d) return;
+    const r = await keepReport(m.id, d.html);
+    if (!r) { st.kept = false; return; }
+    keptEl.hidden = false;
+    clear(keptEl).append(icon('check', 13), r.in_github ? 'In your library and GitHub' : r.pushing ? 'In your library · saving to GitHub' : 'In your library');
+    keptEl.title = r.in_github || r.pushing ? 'Kept on this box and in GitHub: it opens from the Library on any box' : 'Kept on this box. Connect GitHub in the Library to keep it past this session.';
   }
 
   // ---------- papers ----------
@@ -433,7 +450,7 @@ export function openReport(opts = {}) {
   // The page as one self-contained document: the reader's DOM as it is now, every stylesheet of the app inlined,
   // the current theme. Citation chips become arXiv links, the question and the wave chapters are open. Used for the
   // .html download and for the PDF (the app itself is a fixed-height screen, so printing it gave one page).
-  function standalone() {
+  function standalone(adaptive) {
     const wrap = scroll.querySelector('.rp-wrap');
     if (!wrap) return null;
     const clone = wrap.cloneNode(true);
@@ -464,6 +481,7 @@ export function openReport(opts = {}) {
     const html = '<!doctype html><html lang="en" data-theme="' + theme + '"><head><meta charset="utf-8">'
       + '<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="' + theme + '">'
       + '<title>' + esc(title) + '</title>'
+      + (adaptive ? '<script>try{document.documentElement.dataset.theme=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){}</script>' : '')
       + '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..700&family=Geist+Mono:wght@400;500&display=swap">'
       + '<style>' + css + '\n' + STANDALONE_CSS + '</style></head><body class="rp-standalone"><div class="rp open"><div class="rp-scroll">'
       + clone.outerHTML.replace('</article>', '<p class="rp-saved">' + esc(saved) + '</p></article>')
@@ -472,7 +490,7 @@ export function openReport(opts = {}) {
   }
   const fileName = (title, ext) => (title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'sabha-report') + ext;
   function savePage() {
-    const d = standalone();
+    const d = standalone(true);
     if (!d) { toast('Nothing to save yet', { tone: 'sun' }); return; }
     const url = URL.createObjectURL(new Blob([d.html], { type: 'text/html' }));
     const a = h('a', { href: url, download: fileName(d.title, '.html') });

@@ -9,6 +9,7 @@ import { toast } from './notify.js';
 import { createTaste } from './taste.js';
 import { openReport } from './report.js';
 import { createTimeDial } from './timedial.js';
+import { createLibrary } from './library.js';
 
 const POLL_MS = 3000;
 const SHEET_MS = 4000;
@@ -94,8 +95,11 @@ export function createResearch() {
   const knowBtn = h('button.btn', { hidden: true, title: 'The compact state of knowledge every agent reads at each step', onclick: () => openDoc('State of knowledge', 'knowledge') }, icon('layers', 15), 'What we know');
   const memBtn = h('button.btn', { title: 'What the agents keep after a run: lessons, your preferences, facts, sources', onclick: () => openMemory() }, icon('crew', 15), 'Memory');
   const newBtn = h('button.btn.brand', { onclick: () => openMission() }, icon('plus', 15), 'New mission');
+  // A run started from the app: the next one starts from the taste form, which this button brings into view
+  const startBtn = h('button.btn.r-start', { hidden: true, title: 'Ask a new question: the agents plan, read and write a new report', onclick: () => { setTab('now'); taste.focusForm(); } },
+    h('span.r-start-glow', { 'aria-hidden': 'true' }), icon('plus', 15), 'New research');
   const actions = h('div.r-actions', null,
-    reportBtn, notebookBtn, newBtn, knowBtn,
+    startBtn, reportBtn, notebookBtn, newBtn, knowBtn,
     h('button.btn', { onclick: () => openDoc('Status', 'status') }, icon('log', 15), 'Status'),
     synthBtn, memBtn);
   const hero = h('header.r-hero', null,
@@ -127,7 +131,32 @@ export function createResearch() {
     waveNow, waveBar, waveSub, waveList);
   const bodyEl = h('div.r-body', null, banner, waveCard, grid, h('div.r-lower', null, allCard, cmdCard, feedCard));
   const taste = createTaste({ onChange: () => setTimeout(tick, 400) });
-  const el = h('div.view.research', { 'data-view': 'research' }, h('div.r-scroll.scroll', null, h('div.r-col', null, hero, taste.el, bodyEl, empty)));
+  // ---------- tabs: this research, and the library of every research ----------
+  const library = createLibrary({ onOpen: (e) => openFromLibrary(e) });
+  let tab = 'now';
+  const libCount = h('span.r-tab-n');
+  const tabBtns = [['now', 'Research', null], ['library', 'Library', libCount]].map(([k, label, extra]) =>
+    h('button', { role: 'tab', 'aria-selected': String(k === tab), 'data-tab': k, onclick: () => setTab(k) }, label, extra));
+  const tabsEl = h('div.r-tabs', { role: 'tablist', 'aria-label': 'Research' }, tabsElHl(), tabBtns);
+  function tabsElHl() { return h('span.r-tabs-hl', { 'aria-hidden': 'true' }); }
+  const nowEl = h('div.r-now-pane', null, hero, taste.el, bodyEl, empty);
+  const libEl = h('div.r-lib-pane', { hidden: true }, library.el);
+  function setTab(k) {
+    tab = k;
+    tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
+    tabsEl.dataset.on = k;
+    nowEl.hidden = k !== 'now'; libEl.hidden = k !== 'library';
+    if (k === 'library') library.load();
+  }
+  async function openFromLibrary(e) {
+    setTab('now');
+    wanted = e.live_mission; missionSel.value = e.live_mission;
+    while (busy) await new Promise((r) => setTimeout(r, 120));  // a poll in flight would swallow this tick
+    await tick();
+    if (data && data.mission && data.mission.id === e.live_mission && data.mission.has_report) reader('report');
+  }
+  const el = h('div.view.research', { 'data-view': 'research' }, h('div.r-scroll.scroll', null, h('div.r-col', null, tabsEl, nowEl, libEl)));
+  tabsEl.dataset.on = 'now';
   allIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendAll(); } });
 
   // ---------- tiles ----------
@@ -170,6 +199,7 @@ export function createResearch() {
     const d = data;
     if (!d) return;
     taste.update(d);
+    setText(libCount, String((d.missions || []).length || ''));
     const m = d.mission;
     bodyEl.hidden = !m; hero.classList.toggle('bare', !m);
     stats.hidden = !m; rawEl.hidden = !m; pulseEl.hidden = !m;
@@ -193,6 +223,7 @@ export function createResearch() {
     empty.hidden = true; actions.hidden = false; ledeEl.hidden = false;
     const alive = d.daemon && d.daemon.alive;
     newBtn.hidden = !alive || !!(d.run && d.run.mission); // queued briefs are for a git-driven daemon; app runs start from the taste form
+    startBtn.hidden = !('run' in d) || !!(d.run && d.run.running);
     const st = m.stats || {};
 
     // hero (a mission that is done is finished, not offline: no daemon is expected any more)

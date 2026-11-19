@@ -29,6 +29,7 @@ from .harness.dsh import dsh_path
 from .missions import MissionManager
 from .models import ModelManager
 from .research_api import Research, add_routes as add_research_routes
+from .library import Library, add_routes as add_library_routes
 from .recall import Recall
 from .research_run import Runner, read_boot
 from .notify import Notifier
@@ -100,6 +101,7 @@ class Hub:
         self.taste = Taste(cfg.data_dir)
         self.recall = Recall(self)  # the box's memory, searched by Talk
         self.research = Research(self)
+        self.library = Library(self)
         self.runner = Runner(self, cfg.research_repo)
         self.public_link = ""
         self.notifier = Notifier(self)  # phone push, Telegram, WhatsApp, email, calls (sabha/notify.py)
@@ -279,7 +281,8 @@ def _token_ok(request: web.Request, cfg: Config) -> bool:
     header = request.headers.get("Authorization", "")
     if header.lower().startswith("bearer "):
         supplied = header[7:].strip()
-    elif request.path == "/ws" or request.path.startswith("/api/research/export/"):  # a socket or a plain download link sends no header
+    elif (request.path == "/ws" or request.path.startswith("/api/research/export/")  # a socket or a plain download link sends no header
+          or (request.path.startswith("/api/library/") and request.path.endswith("/html"))):  # a report opened in a new tab
         supplied = request.query.get("token", "")
     return bool(supplied) and hmac.compare_digest(supplied.encode(), cfg.token.encode())
 
@@ -884,6 +887,7 @@ def create_app(hub: Hub) -> web.Application:
     r.add_get("/api/councils/{id}/section", council_section)
     r.add_get("/api/events", all_events)
     add_research_routes(r, _hub, _body)
+    add_library_routes(r, _hub, _body)
     add_nirmana_routes(r, _hub, _body)
     r.add_get("/api/memory/search", memory_search)
     r.add_get("/api/memory/doc", memory_doc)
