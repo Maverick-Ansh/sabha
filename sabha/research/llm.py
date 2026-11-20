@@ -97,6 +97,8 @@ def _hub_pool() -> dict[str, list[Endpoint]] | None:
         ctx = min(ctx0, max(cw - 1024, 4096)) if cw else ctx0
         conc = int(m.get("concurrency") or 0) or conc0
         key = os.environ.get(m.get("api_key_env") or "", "") if m.get("api_key_env") else ""
+        if not key and "/api/relay/" in url:  # a box linked after this run started: its key variable is not here; the fleet token is
+            key = os.environ.get("SABHA_TOKEN", "")
         ep = _by_url.get(url)
         if ep is None:
             ep = _by_url[url] = Endpoint(r, url, m.get("served_name") or r, conc, ctx, key, m.get("name") or url)

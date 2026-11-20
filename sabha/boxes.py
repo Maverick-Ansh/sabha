@@ -203,6 +203,10 @@ class Boxes:
         """Make this hub's remote models match the box's local models: one per server port."""
         ids: dict[str, str] = dict(b.get("model_ids") or {})
         big = max([int(g.get("mem_mb") or 0) for g in info.get("gpus") or []] or [0]) >= 40000
+        # A box with this hub's own token (the usual fleet) uses SABHA_TOKEN, which every process started from the hub has
+        # (a research daemon started before the box was linked does not have SABHA_BOX_KEY_<id>: it got 401s).
+        same = (b.get("token") or "") == (self.hub.cfg.token or "") and os.environ.get("SABHA_TOKEN") == self.hub.cfg.token
+        key_env = "SABHA_TOKEN" if same else self._env_name(b["id"])
         seen = set()
         for m in info.get("models") or []:
             port = str(m["port"])
@@ -210,7 +214,7 @@ class Boxes:
             short = re.sub(r"\s*\((deep|reader|m\d+)\)\s*$", "", m.get("name") or m.get("served_name") or "model")
             want = {"name": f"{short} @ {b['label']}"[:80], "kind": "chat",
                     "base_url": f"{b['base']}/api/relay/{port}/v1", "served_name": m.get("served_name") or "",
-                    "context_window": int(m.get("context_window") or 32768), "api_key_env": self._env_name(b["id"]),
+                    "context_window": int(m.get("context_window") or 32768), "api_key_env": key_env,
                     "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
                     "concurrency": int(m.get("concurrency") or 0) or (16 if big else 0),
                     "notes": f"linked box {b['id']} ({b['label']}), port {port}"}
