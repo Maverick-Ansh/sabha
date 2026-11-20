@@ -231,6 +231,11 @@ def secret(name: str) -> str:
         return (UserSecretsClient().get_secret(name) or "").strip()
     except Exception:
         pass
+    # A Kaggle box opened through a Colab tab also has google.colab, and there every userdata.get of a name the owner
+    # never set pops a "Secrets Access" dialog that blocks the cell (one per optional secret). On Kaggle the secrets
+    # live in Kaggle only: an unset one is just empty. SABHA_COLAB_SECRETS=0 turns the Colab lookup off anywhere.
+    if os.path.isdir("/kaggle") or os.environ.get("KAGGLE_KERNEL_RUN_TYPE") or os.environ.get("SABHA_COLAB_SECRETS") == "0":
+        return ""
     try:
         from google.colab import userdata  # type: ignore
         return (userdata.get(name) or "").strip()
