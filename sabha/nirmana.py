@@ -912,6 +912,24 @@ def add_routes(router, hub_of, body_of) -> None:
     router.add_post("/api/nirmana/default", post_default)
     router.add_post("/api/nirmana/models/{role}/ctx", ctx)
     router.add_delete("/api/nirmana/models/{role}", remove)
+
+    async def server_log(request):
+        """The tail of a model server's log on this box (<data>/logs/<role>.vllm.log), so a hub can read why a
+        linked box's server failed. ?n= bytes, at most 200000."""
+        role = request.match_info["role"]
+        if not re.fullmatch(r"[a-z0-9_-]{1,24}", role):
+            raise ApiError(400, "bad role")
+        n = min(max(int(request.query.get("n") or 8000), 500), 200000)
+        p = Path(nm(request).hub.cfg.data_dir) / "logs" / f"{role}.vllm.log"
+        try:
+            with open(p, "rb") as f:
+                f.seek(0, 2)
+                f.seek(max(f.tell() - n, 0))
+                text = f.read().decode("utf-8", "replace")
+        except OSError:
+            raise ApiError(404, f"no log for {role} on this box") from None
+        return web.json_response({"role": role, "text": text})
+    router.add_get("/api/nirmana/models/{role}/log", server_log)
     router.add_post("/api/nirmana/try", try_)
     router.add_get("/api/nirmana/flows", flows)
     router.add_post("/api/nirmana/flows", new_flow)

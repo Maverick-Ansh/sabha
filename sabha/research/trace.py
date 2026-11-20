@@ -17,6 +17,7 @@ Context (track, paper, title, step) comes from the calling thread's live slot (r
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 
@@ -27,9 +28,37 @@ _lock = threading.Lock()
 MAX_TEXT = 1200
 
 
+_calls = ""  # state/calls.jsonl: every model exchange IN FULL (system, input, answer), the coordination history
+MAX_FULL = 60000
+_seq = 0
+
+
 def bind(path: str) -> None:
-    global _path
+    global _path, _calls
     _path = path
+    _calls = os.path.join(os.path.dirname(path), "calls.jsonl") if path else ""
+
+
+def exchange(**rec) -> None:
+    """One model call, complete: who asked (track, paper, step), which server answered (endpoint, box), the full
+    system prompt, input and answer, tokens, seconds, error. Never raises."""
+    global _seq
+    if not _calls:
+        return
+    try:
+        cur = live.current()
+        with _lock:
+            _seq += 1
+            n = _seq
+        out = {"n": n, "t": round(time.time(), 2), "track": cur.get("track"), "paper": cur.get("paper"),
+               "title": (cur.get("title") or "")[:160], "step": cur.get("step"), "slot": live.key()}
+        for k, v in rec.items():
+            out[k] = v[:MAX_FULL] if isinstance(v, str) else v
+        line = json.dumps(out, ensure_ascii=False, default=str)
+        with _lock, open(_calls, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def emit(kind: str, text: str = "", **fields) -> None:

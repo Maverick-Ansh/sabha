@@ -305,6 +305,7 @@ def chat(role: str, system: str, user: str, max_tokens: int = 800, schema: dict 
         except urllib.error.HTTPError as e:
             msg = e.read()[:400].decode("utf-8", "replace")
             last = f"{ep.label} HTTP {e.code}: {msg}"
+            _record(role, ep, attempt, system, body, "", t0, error=last)
             with _lock:
                 STATS[r]["fail"] += 1
             if e.code == 400 and schema and "context" not in msg.lower() and "token" not in msg.lower():
@@ -321,6 +322,7 @@ def chat(role: str, system: str, user: str, max_tokens: int = 800, schema: dict 
             continue
         except Exception as e:
             last = f"{ep.label} {type(e).__name__}: {str(e)[:120]}"
+            _record(role, ep, attempt, system, body, "", t0, error=last)
             with _lock:
                 STATS[r]["fail"] += 1
             _health.pop(r, None)
@@ -344,7 +346,9 @@ def chat(role: str, system: str, user: str, max_tokens: int = 800, schema: dict 
             ep.calls += 1
             ep.tok += ntok
             ep.sec += time.time() - t0
-        if looping(text):
+        loop_ = looping(text)
+        _record(role, ep, attempt, system, body, text, t0, usage=d.get("usage") or {}, looped=loop_)
+        if loop_:
             last = f"{r} output looped"
             temperature = min(temperature + 0.2, 0.9)
             continue
@@ -353,6 +357,15 @@ def chat(role: str, system: str, user: str, max_tokens: int = 800, schema: dict 
         return text
     trace.emit("error", f"{role} model gave no answer: {last[:300]}")
     raise LLMError(last or "no answer")
+
+
+def _record(role: str, ep: Endpoint, attempt: int, system: str, body: dict, text: str, t0: float, **kw) -> None:
+    """The full exchange into state/calls.jsonl (trace.exchange): the coordination history the app shows."""
+    usage = kw.pop("usage", {}) or {}
+    trace.exchange(asked=role, role=ep.role, endpoint=ep.label, remote=ep.remote, model=ep.name, attempt=attempt,
+                   json=bool(body.get("response_format")), max_tokens=body.get("max_tokens"), system=system,
+                   input=body["messages"][-1]["content"], output=text, tok=usage.get("completion_tokens", 0),
+                   prompt_tok=usage.get("prompt_tokens", 0), secs=round(time.time() - t0, 2), **kw)
 
 
 def chat_json(role: str, system: str, user: str, schema: dict | None, max_tokens: int = 800, **kw) -> dict:
