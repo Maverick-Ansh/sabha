@@ -371,6 +371,11 @@ class MissionManager:
         text = body.get("text") or ""
         if not isinstance(text, str):
             raise ApiError(400, "text must be a string")
+        if "max-tokens" in (mission.get("error") or "") and mission.get("session_id"):
+            # The last run filled the model's context window: continuing that session gives the model no room to
+            # answer (seen: 26.5k of 32k used before the first word, a 1-token reply, 'max-tokens' again). Start a
+            # fresh session from the task, the files already on disk and the follow-up.
+            mission["session_id"] = ""
         self._start(mission, self._followup_task(mission, text.strip()), resumed=True)
         return mission
 
@@ -425,8 +430,18 @@ class MissionManager:
             parts.append("Notes from the human:\n" + "\n".join(f"- {t}" for t in notes))
         body = "\n\n".join(parts) or "Continue where you left off and finish the task."
         if not mission.get("session_id"):
-            # no harness session to resume: restate the original task
-            body = f"{mission['prompt']}\n\nFollow-up:\n{body}"
+            # no harness session to resume: restate the original task, and say what is already on disk
+            files = []
+            try:
+                root = self.workspace(mission)
+                for f in sorted(root.rglob("*")):
+                    if f.is_file() and len(files) < 30:
+                        files.append(f"{f.relative_to(root)} ({f.stat().st_size} bytes)")
+            except OSError:
+                pass
+            have = ("\n\nAlready in your workspace from earlier runs (read only what you need, keep outputs short):\n"
+                    + "\n".join(f"- {x}" for x in files)) if files else ""
+            body = f"{mission['prompt']}{have}\n\nFollow-up:\n{body}"
         return body
 
     # ------------------------------------------------------------ planning
