@@ -78,11 +78,11 @@ export function openReport(opts = {}) {
   closeReport();
   const wanted = opts.wanted || '';
   const mq = wanted ? '&mission=' + enc(wanted) : '';
-  const st = { tab: 'report', docs: {}, papers: new Map(), tracks: [], timer: 0, spy: null, refineTimer: 0, filter: { q: '', track: '' } };
+  const st = { conv: { q: '', track: '', step: '', endpoint: '', errors: false, rows: [], more: false, total: 0, open: new Set() }, tab: 'report', docs: {}, papers: new Map(), tracks: [], timer: 0, spy: null, refineTimer: 0, filter: { q: '', track: '' } };
   const ov = () => (opts.overview && opts.overview()) || null;
 
   // ---------- frame ----------
-  const tabBtns = [['report', 'Report'], ['notebook', 'Notebook'], ['papers', 'Papers']].map(([k, label]) =>
+  const tabBtns = [['report', 'Report'], ['notebook', 'Notebook'], ['papers', 'Papers'], ['talk', 'Conversations']].map(([k, label]) =>
     h('button', { role: 'tab', 'aria-selected': 'false', 'data-tab': k, onclick: () => show(k) }, label));
   const tabs = h('div.rp-tabs', { role: 'tablist', 'aria-label': 'Report parts' }, tabBtns);
   const refineBtn = h('button.btn.sm.rp-refine', { hidden: true, onclick: () => refine() }, icon('spark', 14), h('span', null, 'Refine'));
@@ -383,6 +383,121 @@ export function openReport(opts = {}) {
     paintGrid();
   }
 
+  // ---------- conversations: every exchange between the agents and the models, in full (state/calls.jsonl) ----------
+  const fmtT = (t) => { const d = new Date((t || 0) * 1000); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); };
+  const kfmt = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n || 0));
+  function convQuery(before) {
+    const c = st.conv, q = new URLSearchParams();
+    if (wanted) q.set('mission', wanted);
+    for (const k of ['track', 'step', 'endpoint', 'q']) if (c[k]) q.set(k, c[k]);
+    if (c.errors) q.set('errors', '1');
+    if (before) q.set('before', String(before));
+    q.set('limit', '120');
+    return '/api/research/calls?' + q.toString();
+  }
+  async function loadConv(older) {
+    const c = st.conv;
+    const r = await get(convQuery(older && c.rows.length ? c.rows[0].n : 0));
+    c.total = r.total; c.matched = r.matched; c.endpoints = r.endpoints || []; c.steps = r.steps || []; c.tracks = r.tracks || [];
+    if (older) { c.rows = [...r.rows, ...c.rows]; c.more = r.more; }
+    else { c.rows = r.rows; c.more = r.more; }
+  }
+  function paintConv() {
+    setText(barTitle, 'Conversations');
+    const c = st.conv;
+    const wrap = h('div.rp-wrap', null);
+    const list = h('div.cv-list');
+    const head = h('div.cv-head');
+    const tools = h('div.cv-tools');
+    clear(scroll).appendChild(h('div.rp-wrap', null, h('div.rp-papers', null,
+      h('div.rp-papers-head', null, h('h1.rp-title.sm', null, 'Every exchange, in full'),
+        h('div.micro.dim', null, 'What each agent asked, which model on which box answered, and the whole answer. Newest at the bottom.')),
+      head, tools, list)));
+    let tmr = 0;
+    const sel = (key, label, opts) => h('select.input.cv-sel', { 'aria-label': label, onchange: (e) => { c[key] = e.target.value; reload(); } },
+      h('option', { value: '' }, label), opts.map((o) => h('option', { value: o.v, selected: c[key] === o.v ? '' : null }, o.l)));
+    function paintTools() {
+      const trk = (c.tracks || []).map((t) => ({ v: t, l: (trackOf(t) || {}).name || t }));
+      clear(tools).append(
+        h('input.input.rp-search', { type: 'search', placeholder: 'Search what was asked and answered', value: c.q,
+          oninput: (e) => { c.q = e.target.value; clearTimeout(tmr); tmr = setTimeout(reload, 350); } }),
+        sel('track', 'Every agent', trk),
+        sel('step', 'Every step', (c.steps || []).map((x) => ({ v: x, l: x }))),
+        sel('endpoint', 'Every model', (c.endpoints || []).map((e) => ({ v: e.endpoint, l: e.endpoint }))),
+        h('label.cv-err', null, h('input', { type: 'checkbox', checked: c.errors ? '' : null, onchange: (e) => { c.errors = e.target.checked; reload(); } }), 'failures only'));
+    }
+    function paintHead() {
+      const tot = (c.endpoints || []).reduce((a, e) => a + e.calls, 0) || 1;
+      clear(head).append(h('div.cv-stats', null,
+        h('div.cv-stat', null, h('b', null, kfmt(c.total)), h('span.micro', null, 'exchanges')),
+        ...(c.endpoints || []).map((e) => h('div.cv-ep', { title: `${e.calls} calls, ${e.errors} failed, ${kfmt(e.tok)} tokens out, ${Math.round(e.secs)} s of model time` },
+          h('div.cv-ep-top', null, h('span.cv-where', null, e.remote ? 'other box' : 'this box'), h('b.ellipsis', null, e.endpoint)),
+          h('div.cv-bar', null, h('i', { style: { width: `${Math.max(2, (e.calls / tot) * 100)}%` } })),
+          h('div.micro.mono', null, `${e.calls} calls · ${kfmt(e.tok)} tok · ${e.calls ? (e.secs / e.calls).toFixed(1) : 0} s avg${e.errors ? ` · ${e.errors} failed` : ''}`)))));
+    }
+    function row(r) {
+      const tr = r.track ? trackOf(r.track) : null;
+      const body = h('div.cv-body', { hidden: !c.open.has(r.n) });
+      const el = h('div.cv-row' + (r.error ? '.err' : ''), { 'data-hue': (tr && tr.hue) || null },
+        h('button.cv-line', { onclick: async () => {
+          if (c.open.has(r.n)) { c.open.delete(r.n); body.hidden = true; return; }
+          c.open.add(r.n); body.hidden = false;
+          if (!body.firstChild) await fillBody(r, body);
+        } },
+          h('span.cv-t.mono', null, fmtT(r.t)),
+          h('span.cv-who', null, h('i'), tr ? tr.name : (r.track || 'team')),
+          h('span.cv-step', null, r.step || 'model call'),
+          h('span.cv-arrow.micro', null, `asked ${r.asked}${r.role && r.role !== r.asked ? ' → ' + r.role : ''}`),
+          h('span.cv-ep.ellipsis', { title: r.endpoint }, r.endpoint),
+          h('span.cv-num.mono', null, r.error ? 'failed' : `${kfmt(r.prompt_tok)}→${kfmt(r.tok)} · ${r.secs}s`)),
+        h('div.cv-prev', null, r.error ? r.error : (r.title ? `[${r.title.slice(0, 70)}] ` : '') + (r.output || '')),
+        body);
+      if (c.open.has(r.n)) fillBody(r, body);
+      return el;
+    }
+    async function fillBody(r, body) {
+      clear(body).appendChild(h('p.micro.dim', null, 'loading…'));
+      try {
+        const f = await get(`/api/research/calls/${r.n}${wanted ? '?mission=' + enc(wanted) : ''}`);
+        const block = (label, text, md) => {
+          const d = h('div.cv-block', null, h('div.micro.cv-label', null, label));
+          let t = String(text || '');
+          if (!md) { try { if (/^\s*[{[]/.test(t)) t = JSON.stringify(JSON.parse(t), null, 2); } catch { /* as is */ } d.appendChild(h('pre.cv-pre', null, t || '(empty)')); }
+          else { const m = h('div.md'); renderInto(m, t || '_(empty)_'); d.appendChild(m); }
+          return d;
+        };
+        const json = f.json;
+        clear(body).append(
+          h('div.micro.mono.cv-meta', null, `#${f.n} · ${f.model} via ${f.endpoint}${f.remote ? ' (another box)' : ''} · try ${f.attempt + 1} · max ${f.max_tokens} tok${json ? ' · JSON schema' : ''}${f.looped ? ' · LOOPED (retried)' : ''}${f.paper ? ' · paper ' + f.paper : ''}`),
+          block('system: who the agent was told it is', f.system, false),
+          block(`input (${kfmt(f.input.length)} chars)`, f.input, false),
+          f.error ? block('error', f.error, false) : block(`answer (${f.tok} tokens, ${f.secs} s)`, f.output, !json));
+      } catch (e) { clear(body).appendChild(h('p.dim', null, e.message)); }
+    }
+    function paintList() {
+      clear(list);
+      if (c.more) list.appendChild(h('button.btn.sm.cv-older', { onclick: async () => { await loadConv(true); paintList(); } }, `Show older (${c.matched - c.rows.length} more)`));
+      if (!c.rows.length) list.appendChild(h('div.rp-empty', null, h('p.dim', null, c.total ? 'No exchange matches.' : 'No exchange yet: they appear as the agents start working.')));
+      for (const r of c.rows) list.appendChild(row(r));
+    }
+    async function reload() {
+      try { await loadConv(false); } catch (e) { clear(list).appendChild(h('p.dim', null, e.message)); return; }
+      paintTools(); paintHead(); paintList();
+    }
+    st.convRefresh = async () => {  // live: new exchanges at the bottom, keeping what is open
+      const atBottom = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 80;
+      const last = c.rows.length ? c.rows[c.rows.length - 1].n : 0;
+      try {
+        const r = await get(convQuery(0));
+        c.total = r.total; c.endpoints = r.endpoints || []; c.steps = r.steps || []; c.tracks = r.tracks || [];
+        const fresh = (r.rows || []).filter((x) => x.n > last);
+        if (fresh.length) { c.rows = [...c.rows, ...fresh]; for (const x of fresh) list.appendChild(row(x)); paintHead(); if (atBottom) scroll.scrollTop = scroll.scrollHeight; }
+      } catch { /* next tick */ }
+    };
+    reload().then(() => { scroll.scrollTop = scroll.scrollHeight; });
+    void wrap;
+  }
+
   // ---------- peek ----------
   function hidePeek() { peekEl.hidden = true; peekEl.classList.remove('wide'); clear(peekEl); }
   function peek(aid, anchor) {
@@ -519,7 +634,7 @@ export function openReport(opts = {}) {
     const m = o && o.mission;
     const r = m && m.refining;
     const ended = m && m.status === 'done';
-    refineBtn.hidden = !ended || st.tab === 'papers';
+    refineBtn.hidden = !ended || st.tab === 'papers' || st.tab === 'talk';
     refineBtn.disabled = !!(r && r.running);
     refineBtn.classList.toggle('brand', !!(ended && !m.has_final));
     setText(refineBtn.lastChild, r && r.running ? 'Refining…' : m && m.has_final ? 'Refine again' : 'Write the finished report');
@@ -557,10 +672,11 @@ export function openReport(opts = {}) {
     tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
     hidePeek();
     paintRefine();
-    if (k === 'papers') paintPapers(); else paintDoc(k, false);
+    if (k === 'papers') paintPapers(); else if (k === 'talk') paintConv(); else paintDoc(k, false);
   }
   async function poll() {
     if (document.hidden) return;
+    if (st.tab === 'talk') { if (st.convRefresh) st.convRefresh(); return; }
     const o = ov();
     if (!o || !o.mission || o.mission.status === 'done') return;
     try {

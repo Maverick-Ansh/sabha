@@ -74,6 +74,10 @@ function setNum(el, v) {
   requestAnimationFrame(step);
 }
 
+// #/research/talk (or /report, /notebook, /papers) opens the reader on that tab once the run is loaded. Read at import,
+// before main.js rewrites the hash to #/research.
+let deepTab = (location.hash.match(/^#\/research\/(report|notebook|papers|talk)\b/) || [])[1] || '';
+
 export function createResearch() {
   let data = null, active = false, timer = 0, busy = false, wanted = null, sheet = null, lastMission = '', built = '';
   const tiles = new Map();
@@ -342,7 +346,10 @@ export function createResearch() {
   async function tick() {
     if (busy) return;
     busy = true;
-    try { data = await get('/api/research' + q()); render(); } catch (e) {
+    try {
+      data = await get('/api/research' + q()); render();
+      if (deepTab && data && data.mission) { const t = deepTab; deepTab = ''; reader(t); }
+    } catch (e) {
       if (e.status !== 401 && !data) { data = { available: false, hint: `The hub did not answer: ${e.message}` }; render(); data = null; }
     } finally { busy = false; }
   }
