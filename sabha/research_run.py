@@ -286,8 +286,17 @@ class Runner:
                                                          "--set", "cs"], env, "harvest.log")
             if not find_proc("sabha.research.index"):
                 pids["index"] = self._spawn("index", ["-m", "sabha.research.index", "build", "--device", device], env, "index.log")
+            # the daemon routes every model call over the hub's READY models (this box and linked boxes, llm.py pool),
+            # and reads that many papers at once: about one per 3 slots of model capacity, 6 to 16
+            env["SABHA_HUB_URL"] = f"http://127.0.0.1:{hub.cfg.port}"
+            env["SABHA_TOKEN"] = hub.cfg.token or env.get("SABHA_TOKEN", "")
+            cap = sum(int(m.get("concurrency") or 0) or (4 if m.get("served_name") == "deep" else 6)
+                      for m in hub.store.models.values() if m.get("status") == "ready" and m.get("base_url")
+                      and m.get("served_name") in ("deep", "reader"))
+            slots = int(os.environ.get("SABHA_RESEARCH_SLOTS") or min(max(cap // 3, 6), 16))
             pids["daemon"] = self._spawn("daemon", ["-m", "sabha.research.run", "--repo", self.repo, "--mission", mid,
-                                                    "--hours", f"{hours:.3f}", "--once", "--wave-min", f"{wave_min:g}"],
+                                                    "--hours", f"{hours:.3f}", "--once", "--wave-min", f"{wave_min:g}",
+                                                    "--slots", str(slots)],
                                          env, "research.log")
         now = time.time()
         write_json(str(self.state_path), {"mission": mid, "started": now, "until": now + hours * 3600, "hours": hours,

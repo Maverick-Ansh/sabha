@@ -75,6 +75,14 @@ def clean_model_fields(body: dict, partial: bool) -> dict:
         if cw <= 0:
             raise ApiError(400, "context_window must be positive")
         out["context_window"] = cw
+    if "concurrency" in body:  # how many calls the research engine sends this server at once (0: the role's default)
+        try:
+            cc = int(body["concurrency"] or 0)
+        except (TypeError, ValueError):
+            raise ApiError(400, "concurrency must be an integer") from None
+        if not 0 <= cc <= 128:
+            raise ApiError(400, "concurrency must be between 0 and 128")
+        out["concurrency"] = cc
     if "extra_body" in body:
         extra = body["extra_body"] if body["extra_body"] is not None else {}
         if not isinstance(extra, dict):
@@ -164,6 +172,7 @@ class ModelManager:
             "status": "ready" if kind == "mock" else "unknown",
             "launch": None,
             "notes": f.get("notes", ""),
+            "concurrency": f.get("concurrency", 0),
         }
         self.store.models[model["id"]] = model
         self._changed(model)

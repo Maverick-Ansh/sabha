@@ -526,7 +526,9 @@ class Daemon:
         ev = read_jsonl(m.p("state", "events.jsonl"))
         hour = [e for e in ev if e.get("kind") == "carded" and time.time() - _ts(e.get("ts")) < 3600]
         sp = llm.speed()
-        health = " ".join(f"{r}=>{llm.OVERRIDE[r]}" if r in llm.OVERRIDE else f"{r}:{'ok' if llm.up(r) else 'DOWN'}" for r in llm.ROLES)
+        pl = llm.pool()  # role: healthy servers / all servers (local and other boxes)
+        health = " ".join(f"{r}=>{llm.OVERRIDE[r]}" if r in llm.OVERRIDE else
+                          f"{r}:{sum(e.ok() for e in pl.get(r) or [])}/{len(pl.get(r) or [])}" for r in llm.ROLES)
         applied = (read_json(m.p("state", "steering_applied.json"), {}) or {}).get("seq", 0)
         line = (f"{time.strftime('%H:%M')} up {int(up // 3600)}h{int(up % 3600 // 60):02d} left {int((self.until - time.time()) // 60)}m "
                 f"cards {len(cards)} queued {m.count('queued')} pph {len(hour)} {health} push {int((time.time() - self.last_push_ok) // 60) if self.last_push_ok else -1}m "
@@ -555,7 +557,7 @@ class Daemon:
         ev = read_jsonl(m.p("state", "events.jsonl"))
         line = open(m.p("state", "status_line.txt"), encoding="utf-8").read().strip() if os.path.exists(m.p("state", "status_line.txt")) else ""
         seq = len([e for e in ev if e.get("kind") == "digest"]) + 1
-        L = [f"# DIGEST {m.id} seq {seq} {now()}", "", "## 1 Health", line, f"tokens/s {llm.speed()}  llm stats {llm.STATS}",
+        L = [f"# DIGEST {m.id} seq {seq} {now()}", "", "## 1 Health", line, f"tokens/s {llm.speed()}  llm stats {llm.STATS}", f"pool {llm.pool_status()}",
              f"failures by reason: {_fail_reasons(m)}", f"tavily {self.budget.d}", "errors:"] + [f"- {x}" for x in self.errors[-10:]]
         L += ["", "## 2 Tracks"]
         for t in m.plan["tracks"]:
