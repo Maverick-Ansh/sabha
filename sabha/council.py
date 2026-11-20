@@ -25,6 +25,7 @@ import shutil
 from pathlib import Path
 
 from . import webtools
+from . import exchanges
 from .talk import ChatError, stream_chat
 from .util import ApiError, mock_speed, new_id, now, short
 
@@ -399,7 +400,9 @@ class CouncilManager:
                 await self._mock(c, seat, agent, kind, piece)
             else:
                 msgs = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
-                await stream_chat(self.hub.http, model, msgs, piece, max_tokens=max_tokens, timeout_s=900)
+                with exchanges.recording(exchanges.path_for(self.hub.cfg.data_dir, "council", c["id"]), track=agent["name"],
+                                         asked=agent["name"], step=kind, round=c["round"], title=(c.get("title") or "")[:120]):
+                    await stream_chat(self.hub.http, model, msgs, piece, max_tokens=max_tokens, timeout_s=900)
         except asyncio.CancelledError:
             if "".join(text_parts).strip():
                 self._append(c, role="agent", kind=kind, agent_id=agent["id"], msg_id=msg_id,

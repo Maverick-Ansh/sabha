@@ -24,6 +24,7 @@ import time
 import aiohttp
 from aiohttp import web
 
+from . import exchanges
 from .models import auth_headers
 from .research import inbox as rinbox
 from .research.memory import latest, read_json, read_jsonl
@@ -154,7 +155,6 @@ class Research:
         self._summaries: dict[tuple, dict] = {}
         self._sum_locks: dict[tuple, asyncio.Lock] = {}
         self._refining: dict[str, dict] = {}  # mission id -> {running, started, error, done}
-        self._calls_ix: dict[str, dict] = {}  # calls.jsonl path -> incremental index (Conversations)
 
     # ------------------------------------------------------------ files
 
@@ -448,80 +448,22 @@ class Research:
 
     # ------------------------------------------------------------ conversations: every model exchange (state/calls.jsonl)
 
-    def _calls_index(self, path: str) -> dict:
-        """Light rows (no full text) + each line's byte offset, read incrementally as the file grows."""
-        ix = self._calls_ix.setdefault(path, {"size": 0, "rows": [], "off": {}})
-        try:
-            size = os.path.getsize(path)
-        except OSError:
-            return ix
-        if size < ix["size"]:  # rewritten: start over
-            ix.update(size=0, rows=[], off={})
-        if size == ix["size"]:
-            return ix
-        with open(path, "rb") as f:
-            f.seek(ix["size"])
-            pos = ix["size"]
-            for raw in f:
-                if not raw.endswith(b"\n"):  # a line still being written: next time
-                    break
-                try:
-                    r = json.loads(raw)
-                except ValueError:
-                    pos += len(raw)
-                    continue
-                n = int(r.get("n") or 0)
-                ix["off"][n] = pos
-                prev = lambda s, k=220: (s or "")[:k].replace("\n", " ")  # noqa: E731
-                ix["rows"].append({"n": n, "t": r.get("t"), "track": r.get("track"), "paper": r.get("paper"),
-                                   "title": r.get("title") or "", "step": r.get("step") or "", "asked": r.get("asked"),
-                                   "role": r.get("role"), "endpoint": r.get("endpoint") or "", "remote": bool(r.get("remote")),
-                                   "attempt": r.get("attempt") or 0, "json": bool(r.get("json")), "tok": r.get("tok") or 0,
-                                   "prompt_tok": r.get("prompt_tok") or 0, "secs": r.get("secs") or 0,
-                                   "error": r.get("error") or "", "looped": bool(r.get("looped")),
-                                   "in_len": len(r.get("input") or ""), "out_len": len(r.get("output") or ""),
-                                   "input": prev(r.get("input"), 160), "output": prev(r.get("output"))})
-                pos += len(raw)
-            ix["size"] = pos
-        return ix
-
     def calls(self, mission_id: str | None = None, before: int = 0, limit: int = 150, track: str = "", step: str = "",
               endpoint: str = "", q: str = "", errors: bool = False) -> dict:
         L = self._load(mission_id) if self.available() else None
         if L is None:
             raise ApiError(404, "no research mission")
-        ix = self._calls_index(os.path.join(L["root"], "state", "calls.jsonl"))
-        rows = ix["rows"]
-        ql = q.lower().strip()
-        sel = [r for r in rows if (not track or r["track"] == track) and (not step or r["step"] == step)
-               and (not endpoint or r["endpoint"] == endpoint) and (not errors or r["error"])
-               and (not ql or ql in (r["input"] + r["output"] + r["title"] + r["step"]).lower())]
-        if before:
-            sel = [r for r in sel if r["n"] < before]
-        page = sel[-max(1, min(limit, 500)):]
-        by_ep: dict[str, dict] = {}
-        for r in rows:
-            e = by_ep.setdefault(r["endpoint"] or "?", {"endpoint": r["endpoint"] or "?", "remote": r["remote"], "calls": 0,
-                                                        "errors": 0, "tok": 0, "secs": 0.0})
-            e["calls"] += 1
-            e["errors"] += bool(r["error"])
-            e["tok"] += r["tok"]
-            e["secs"] += r["secs"]
-        return {"mission": L["id"], "total": len(rows), "matched": len(sel), "rows": page,
-                "more": len(sel) > len(page), "endpoints": sorted(by_ep.values(), key=lambda x: -x["calls"]),
-                "steps": sorted({r["step"] for r in rows if r["step"]}), "tracks": sorted({r["track"] for r in rows if r["track"]})}
+        out = exchanges.listing(os.path.join(L["root"], "state", "calls.jsonl"), before, limit, track, step, endpoint, q, errors)
+        return {"mission": L["id"], **out}
 
     def call_full(self, n: int, mission_id: str | None = None) -> dict:
         L = self._load(mission_id) if self.available() else None
         if L is None:
             raise ApiError(404, "no research mission")
-        path = os.path.join(L["root"], "state", "calls.jsonl")
-        off = self._calls_index(path)["off"].get(int(n))
-        if off is None:
+        rec = exchanges.full(os.path.join(L["root"], "state", "calls.jsonl"), n)
+        if rec is None:
             raise ApiError(404, f"no exchange {n}")
-        with open(path, "rb") as f:
-            f.seek(off)
-            return json.loads(f.readline())
+        return rec
 
     def card_md(self, aid: str, mission_id: str | None = None) -> dict:
         L = self._load(mission_id) if self.available() else None

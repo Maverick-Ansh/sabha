@@ -1,4 +1,5 @@
 // Talk mode: one column of conversation with an agent, live-streamed replies, mission cards.
+import { openExchanges } from './exchanges.js';
 import { h, icon, setText, clear, autogrow } from './dom.js';
 import { get, post, del, enc } from './api.js';
 import { subscribe, getState, agents, agentById, defaultAgent, upsert, remove } from './store.js';
@@ -42,7 +43,12 @@ export function createTalk() {
   const stopBtn = h('button.btn.icon.stop', { title: 'Stop the reply', hidden: true, onclick: stopReply }, icon('stop', 15));
   const composer = h('div.talk-composer.card', null, ta,
     h('div.tc-row', null, h('div.seg.seg-sm', null, modeBtns), planLbl, h('span.spacer'), mic, stopBtn, sendBtn));
-  const main = h('main.talk-main', null, h('div.talk-top', null, railBtn, chips), scroller, h('div.talk-foot', null, composer));
+  const convBtn = h('button.btn.sm.ghost.talk-conv', { title: 'Every exchange of this conversation in full: system prompt, memory and tool results the model saw, its whole answer',
+    onclick: () => { if (!threadId) return; const t = getState().threads && getState().threads[threadId];
+      openExchanges({ title: `Conversations · ${(t && t.title) || 'Talk'}`, scope: 'talk', id: threadId,
+        who: (name) => { const a = Object.values(getState().agents || {}).find((x) => x.name === name); return { name: name || 'Talk', hue: a ? hueOf(a) : null }; } }); } },
+    icon('chat', 14), h('span', null, 'Conversations'));
+  const main = h('main.talk-main', null, h('div.talk-top', null, railBtn, chips, convBtn), scroller, h('div.talk-foot', null, composer));
   const el = h('div', { class: 'view talk' + (railOpen ? '' : ' rail-closed'), 'data-view': 'talk' }, rail, main);
 
   ta.addEventListener('keydown', (e) => {

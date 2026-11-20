@@ -439,3 +439,8 @@ html.rs-collapsed .r-colbar { display: flex; }
   .cv-step, .cv-arrow, .cv-line .cv-ep { display: none; }
   .cv-prev { padding-left: 12px; }
 }
+
+/* Conversations as its own window (Council, Talk) */
+.xo .rp-bar { grid-template-columns: auto 1fr; }
+.c-conv, .talk-conv { gap: 6px; }
+.talk-top .talk-conv { margin-left: auto; }

@@ -727,3 +727,14 @@ Every 30 s each box is asked `GET /api/box` (older boxes: `/api/state` + `/api/b
 models that vanish are kept (status goes down). Three missed polls: `status=down`, event `box.updated {box, what:
 linked|moved|down|up}` (app toast) and a `box` alert (an IMPORTANT kind, never a call). Answering again: `up`.
 The research engine routes over these models too (research/llm.py pool).
+
+## 21. Conversations: every model exchange in full
+
+Research writes `missions/<id>/state/calls.jsonl` (research/llm.py + trace.exchange); Council and Talk write
+`<data>/exchanges/{council|talk}/<id>.jsonl` (sabha/exchanges.py: callers wrap `stream_chat` in `recording(path, **meta)`).
+One row per model call: `{n, t, track (who asked: track / member / agent name), step, round?, asked, role, endpoint (model
+name, box), remote, model, attempt, json, max_tokens?, system, input, output, thinking?, tool_calls?, tok, prompt_tok, secs,
+error}`. Read: `GET /api/research/calls` and `GET /api/exchanges/{scope}/{id}` (`?before=&limit=&track=&step=&endpoint=&q=&errors=1`
+-> `{total, matched, rows (previews), more, endpoints (per-model load), steps, tracks}`), one in full: `.../calls/{n}`,
+`.../{id}/{n}`. App: the research reader's Conversations tab (`#/research/talk`), Council and Talk "Conversations" buttons.
+`POST /api/box/update {models?, hub?}` (section 20): git pull, then restart this box's model servers and/or hub.

@@ -28,6 +28,7 @@ import aiohttp
 
 from . import webtools
 from .harness.mock import topic_of
+from . import exchanges
 from .models import auth_headers
 from .util import ApiError, mock_speed, new_id, now, short
 
@@ -154,7 +155,22 @@ def strip_think(text: str) -> str:
 # ---------------------------------------------------------------- OpenAI-compatible client
 
 
-async def stream_chat(
+async def stream_chat(http, model, messages, on_piece=None, **kw):
+    """Stream one chat completion (see _stream_chat). When the caller marked the call with exchanges.recording(...),
+    the whole exchange (system, input, answer, thinking, tokens, seconds, error) is written for Conversations."""
+    if exchanges.RECORD.get() is None:
+        return await _stream_chat(http, model, messages, on_piece, **kw)
+    t0 = time.time()
+    try:
+        text, thinking, usage = await _stream_chat(http, model, messages, on_piece, **kw)
+    except ChatError as e:
+        exchanges.write(model, messages, "", "", None, t0, error=str(e))
+        raise
+    exchanges.write(model, messages, text, thinking, usage, t0, calls=kw.get("calls"))
+    return text, thinking, usage
+
+
+async def _stream_chat(
     http: aiohttp.ClientSession,
     model: dict,
     messages: list[dict],
@@ -542,8 +558,10 @@ class TalkManager:
         while hop <= MAX_HOPS:
             calls: list[dict] = []
             try:
-                text, _, _ = await stream_chat(self.hub.http, model, msgs, piece, calls=calls,
-                                               tools=TOOLS if use_tools and hop < MAX_HOPS else None)
+                with exchanges.recording(exchanges.path_for(self.hub.cfg.data_dir, "talk", thread["id"]),
+                                         track=(self.store.agents.get(thread.get("agent_id") or "") or {}).get("name") or "Talk", asked="you", step=f"reply, step {hop + 1}"):
+                    text, _, _ = await stream_chat(self.hub.http, model, msgs, piece, calls=calls,
+                                                   tools=TOOLS if use_tools and hop < MAX_HOPS else None)
             except ChatError as e:
                 if use_tools and hop == 0 and not text_parts and re.search(r"HTTP 400.*tool", str(e), re.I | re.S):
                     log.info("model %s refused tools; plain chat from now on: %s", model.get("name"), short(str(e), 160))

@@ -1,4 +1,5 @@
 // Council mode: the crew reads one paper in parts, argues it out, and hands back a verdict.
+import { openExchanges } from './exchanges.js';
 import { h, icon, setText, clear, autogrow, copyText } from './dom.js';
 import { get, post, del, enc } from './api.js';
 import { subscribe, getState, agents, agentById, upsert, remove } from './store.js';
@@ -98,11 +99,16 @@ export function createCouncil() {
   const statusEl = h('span.status');
   const noteEl = h('span.c-note.dim');
   const stepsEl = h('div.c-steps', { 'aria-hidden': 'true' });
+  const convBtn = h('button.btn.sm.ghost.c-conv', { title: 'Every exchange in full: what each member was told and asked, which model answered, the whole answer',
+    onclick: () => { if (!currentId) return; const c = getState().councils && getState().councils[currentId];
+      openExchanges({ title: `Conversations · ${(c && c.title) || 'council'}`, scope: 'council', id: currentId,
+        who: (name) => { const a = Object.values(getState().agents || {}).find((x) => x.name === name); return { name: name || 'member', hue: a ? hueOf(a) : null }; } }); } },
+    icon('chat', 14), h('span', null, 'Conversations'));
   const seatsEl = h('div.c-seats');
   const errEl = h('div.mcard-err', { hidden: true });
   const flow = h('div.c-flow');
   const scroller = h('div.c-scroll.scroll', null, h('div.c-col', null,
-    h('div.c-head', null, h('div.c-headline', null, statusEl, noteEl, h('span.spacer'), stepsEl), titleEl, subEl),
+    h('div.c-head', null, h('div.c-headline', null, statusEl, noteEl, h('span.spacer'), convBtn, stepsEl), titleEl, subEl),
     seatsEl, errEl, flow));
   const ta = h('textarea.talk-input', { rows: 1, placeholder: 'Say something to the council…', 'aria-label': 'Message to the council' });
   const fit = autogrow(ta, 180);

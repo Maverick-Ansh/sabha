@@ -35,6 +35,7 @@ from .research_run import Runner, read_boot
 from .notify import Notifier
 from .nirmana import Nirmana, add_routes as add_nirmana_routes
 from .boxes import Boxes, add_routes as add_box_routes
+from . import exchanges
 from .research_feed import ResearchFeed
 from . import catalog
 from .research import longmem
@@ -888,6 +889,29 @@ async def relay(request):
         return resp
 
 
+# ---- Conversations for Council and Talk: every exchange in full (sabha/exchanges.py)
+
+def _xpath(request) -> str:
+    try:
+        return exchanges.path_for(_hub(request).cfg.data_dir, request.match_info["scope"], request.match_info["id"])
+    except ValueError:
+        raise ApiError(404, "no such conversation") from None
+
+
+async def get_exchanges(request):
+    q = request.query
+    out = await asyncio.to_thread(exchanges.listing, _xpath(request), int(q.get("before") or 0), int(q.get("limit") or 150),
+                                  q.get("track", ""), q.get("step", ""), q.get("endpoint", ""), q.get("q", ""), q.get("errors") == "1")
+    return web.json_response(out)
+
+
+async def get_exchange(request):
+    rec = await asyncio.to_thread(exchanges.full, _xpath(request), int(request.match_info["n"]))
+    if rec is None:
+        raise ApiError(404, "no such exchange")
+    return web.json_response(rec)
+
+
 # ---------------------------------------------------------------- app
 
 
@@ -933,6 +957,8 @@ def create_app(hub: Hub) -> web.Application:
     add_library_routes(r, _hub, _body)
     add_nirmana_routes(r, _hub, _body)
     add_box_routes(r, _hub, _body)
+    r.add_get("/api/exchanges/{scope}/{id}", get_exchanges)
+    r.add_get("/api/exchanges/{scope}/{id}/{n}", get_exchange)
     r.add_get("/api/memory/search", memory_search)
     r.add_get("/api/memory/doc", memory_doc)
     r.add_get("/api/boot", get_boot)
