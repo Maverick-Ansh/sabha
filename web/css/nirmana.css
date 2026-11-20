@@ -339,3 +339,16 @@
 .nm-rrow .nm-dot.st-ready { background: var(--st-done); box-shadow: 0 0 0 3px rgba(var(--mint-rgb), .25); }
 .nm-rrow .nm-dot.st-starting, .nm-rrow .nm-dot.st-pending, .nm-rrow .nm-dot.st-downloading { background: var(--st-running); animation: nm-breathe 1.4s infinite; }
 .nm-rrow .nm-dot.st-failed { background: var(--st-failed); }
+
+.nm-sec-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.nm-addbox { display: flex; gap: 8px; margin: 0 0 14px; }
+.nm-addbox .input { flex: 1; min-width: 0; }
+.nm-joincell { margin: 0 0 14px; padding: 14px; border-radius: 14px; background: rgba(127, 127, 127, .08); display: grid; gap: 10px; }
+.nm-cell-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.nm-cellcode { margin: 0; padding: 12px; border-radius: 10px; background: rgba(127, 127, 127, .12); font-size: 12px; line-height: 1.5;
+  white-space: pre; overflow-x: auto; max-height: 300px; }
+.nm-rstate { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); margin-left: auto; margin-right: 8px; }
+.nm-rbox.bx-up .nm-rstate .nm-dot { background: var(--st-done); }
+.nm-rbox.bx-down .nm-rstate .nm-dot, .nm-rbox.bx-no-answer .nm-rstate .nm-dot { background: var(--st-failed); }
+.nm-rbox.bx-down { outline: 1px solid rgba(255, 90, 90, .45); }
+@media (max-width: 640px) { .nm-addbox { flex-direction: column; } }

@@ -2,7 +2,7 @@
 // and flows: stages chained into a pipeline whose every step is shown while it runs (PROTOCOL.md section 15).
 import { h, icon, setText, clear, autogrow, append } from './dom.js';
 const fill = (el, ...kids) => append(clear(el), kids);  // like el.append, but skips null (native append prints "null")
-import { get, post, put, del, api } from './api.js';
+import { get, post, put, del, api, getToken } from './api.js';
 import { subscribe, getState } from './store.js';
 import { fmtNum, fmtAgo, fmtDur, truncate } from './format.js';
 import { renderInto } from './md.js';
@@ -54,8 +54,70 @@ export function createNirmana() {
   const byEl = h('p.nm-by');
   const defaultEl = h('div.nm-default');
   const remoteEl = h('div.nm-remote');
-  const remoteSec = h('section.nm-sec', { hidden: true }, h('div.nm-sec-h', null, h('h2', null, 'Other boxes'),
-    h('p.nm-by', null, 'Linked through their own link. Load or change their models in their own Sabha.')), remoteEl);
+  // ---------- linking boxes from the app: paste a link, or hand a new box a cell that joins by itself ----------
+  const linkIn = h('input.input.mono', { placeholder: 'https://....trycloudflare.com/#token=...  (the link the other box printed)' });
+  const linkBtn = h('button.btn.brand.sm', { onclick: () => addBox() }, 'Link this box');
+  const addForm = h('div.nm-addbox', { hidden: true }, linkIn, linkBtn);
+  const cellEl = h('div.nm-joincell', { hidden: true });
+  linkIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBox(); });
+  async function addBox() {
+    const link = linkIn.value.trim();
+    if (!link) return linkIn.focus();
+    linkBtn.disabled = true; setText(linkBtn, 'Linking...');
+    try {
+      const b = await post('/api/boxes', { link });
+      toast('Box linked', { sub: `${b.label}: ${(b.models || []).length} model(s) added. They work here once they show ready.`, tone: 'mint', timeout: 7000 });
+      linkIn.value = ''; addForm.hidden = true; refresh();
+    } catch (e) { toast('Could not link the box', { sub: e.message, tone: 'coral', timeout: 9000 }); }
+    linkBtn.disabled = false; setText(linkBtn, 'Link this box');
+  }
+  function joinCell(kind) {
+    const me = (location.origin || '').replace(/\/$/, '');
+    const tokn = getToken() || '';
+    const dir = kind === 'colab' ? '/content' : '/kaggle/working';
+    const where = kind === 'colab' ? 'Colab (Runtime > A100 or T4 GPU)' : 'Kaggle (GPU T4 x2, Internet on)';
+    return [
+      `# Sabha: a new box that joins ${me.replace(/^https?:\/\//, '')} by itself. Paste into a ${where} code cell and run.`,
+      'import importlib, os, subprocess, sys',
+      `os.environ["SABHA_TOKEN"] = "${tokn}"`,
+      `os.environ["SABHA_JOIN"] = "${me}/#token=${tokn}"`,
+      'os.environ["SABHA_COLAB_SECRETS"] = "0"',
+      `APP = "${dir}/sabha"`,
+      'if os.path.isdir(APP + "/.git"):',
+      '    subprocess.run(["git", "-C", APP, "pull", "-q", "--ff-only"])',
+      'else:',
+      '    subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/Maverick-Ansh/sabha.git", APP])',
+      'sys.path.insert(0, APP)',
+      'import sabha.box as box',
+      'box = importlib.reload(box)',
+      'box.up()', ''].join('\n');
+  }
+  function showCell(kind) {
+    const code = joinCell(kind);
+    fill(cellEl,
+      h('div.nm-cell-top', null,
+        h('div.seg', null, ['kaggle', 'colab'].map((k) => h('button', { 'aria-pressed': String(k === kind), onclick: () => showCell(k) }, k === 'kaggle' ? 'Kaggle' : 'Colab'))),
+        h('button.btn.brand.sm', { onclick: async () => {
+          try { await navigator.clipboard.writeText(code); toast('Cell copied', { sub: 'Paste it in the new box and run it. It shows up here by itself in a minute or two.', tone: 'mint' }); }
+          catch { toast('Select the text and copy it', { tone: 'sun' }); }
+        } }, icon('layers', 14), 'Copy cell')),
+      h('p.micro', null, "The new box uses this box's key and reports to it: no link to paste back. If its link changes later, it reports the new one. Keep its cell running."),
+      h('pre.mono.nm-cellcode', null, code));
+    cellEl.hidden = false;
+  }
+  const remoteSec = h('section.nm-sec', null, h('div.nm-sec-h', null, h('h2', null, 'Other boxes'),
+    h('div.nm-sec-actions', null,
+      h('button.btn.sm', { onclick: () => { if (cellEl.hidden) showCell('kaggle'); else cellEl.hidden = true; } }, icon('plus', 14), 'Start a new box'),
+      h('button.btn.sm', { onclick: () => { addForm.hidden = !addForm.hidden; if (!addForm.hidden) linkIn.focus(); } }, 'Add a box by link'))),
+    cellEl, addForm,
+    h('p.nm-by', null, "Their models work here like this box's own: Talk, Council, the crew and research spread over all of them."), remoteEl);
+  subscribe('box', (ev) => {
+    const d = ev.data || {}, b = d.box || {};
+    if (d.what === 'down') toast(`Box down: ${b.label}`, { sub: 'Its models are skipped until it answers again.', tone: 'coral', timeout: 12000 });
+    else if (d.what === 'up') toast(`Box back: ${b.label}`, { tone: 'mint' });
+    else if (d.what === 'linked' || d.what === 'moved') toast(d.what === 'moved' ? `New link for ${b.label}` : `Box joined: ${b.label}`, { sub: b.base, tone: 'mint' });
+    if (active) refresh();
+  });
   modelsEl.append(
     h('section.nm-sec', null, h('div.nm-sec-h', null, h('h2', null, 'The box'), byEl), vesselsEl, defaultEl),
     remoteSec,
@@ -111,8 +173,8 @@ export function createNirmana() {
   // ---------- other boxes this hub uses through their link (multiKaggle): read only, live from each box ----------
   function paintRemote() {
     const boxes = forge.remote || [];
-    remoteSec.hidden = !boxes.length;
     clear(remoteEl);
+    if (!boxes.length) remoteEl.append(h('div.empty-note', null, 'No other box yet. Start a new box (a cell that joins by itself) or add one by its link.'));
     boxes.forEach((b, bi) => {
       const gpuTxt = b.gpus.length ? `${b.gpus.length}× ${b.gpus[0].name.replace(/NVIDIA |Tesla |-SXM4/g, '')}` : '';
       const total = b.gpus.reduce((a, g) => a + g.mem_mb, 0) / 1024;
@@ -130,11 +192,17 @@ export function createNirmana() {
       });
       const vs = h('div.nm-vessels');
       if (b.ok && b.gpus.length) drawVessels(vs, b);
-      remoteEl.append(h('div.nm-rbox.card', null,
+      const state = b.ok ? 'up' : (b.state === 'down' ? 'down' : 'no answer');
+      remoteEl.append(h('div.nm-rbox.card', { class: `bx-${state.replace(' ', '-')}` },
         h('div.nm-v-top', null,
-          h('span.nm-v-name', null, `Box ${bi + 2}${gpuTxt ? ' · ' + gpuTxt : ''}`),
-          h('span.nm-v-chip.mono', null, b.ok ? `${total.toFixed(0)} GB` : b.error || 'unreachable')),
-        h('p.micro.mono.nm-rhost', null, b.host),
+          h('span.nm-v-name', null, b.label || `Box ${bi + 2}${gpuTxt ? ' · ' + gpuTxt : ''}`),
+          h('span.nm-rstate', null, h('span.nm-dot'), state),
+          h('span.nm-v-chip.mono', null, b.ok ? `${total.toFixed(0)} GB` : b.error || 'unreachable'),
+          b.id ? h('button.btn.sm', { title: 'Unlink this box and remove its models here (the box keeps running)', onclick: async () => {
+            if (!confirm(`Unlink ${b.label || b.host}? Its models are removed here; the box itself keeps running.`)) return;
+            try { await del('/api/boxes/' + b.id); refresh(); } catch (e) { toast('Not removed', { sub: e.message, tone: 'coral' }); }
+          } }, 'Unlink') : null),
+        h('p.micro.mono.nm-rhost', null, b.host + (b.via === 'joined' ? ' · joined by itself' : '')),
         vs, h('div.nm-rrows', null, rows.length ? rows : h('div.empty-note', null, b.ok ? 'No models on this box yet.' : 'This box does not answer: its tunnel may have changed.'))));
     });
   }

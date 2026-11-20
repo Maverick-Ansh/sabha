@@ -711,3 +711,19 @@ answer back unchanged (SSE passes through). Behind the hub token like every `/ap
 others, 502 when nothing answers). Another box uses it by registering a model with
 `base_url = https://<this box's link>/api/relay/<port>/v1` and `api_key_env` naming an environment variable that holds
 this box's token (two boxes started with the same `SABHA_TOKEN` use `api_key_env = "SABHA_TOKEN"`).
+
+## 20. Linked boxes (`sabha/boxes.py`, Nirmana "Other boxes")
+
+One hub uses the models of other Sabha boxes. `GET /api/box` = this box: `{id, link, platform, gpus, models:[{name,
+served_name, port, status, context_window, concurrency}], ready, stage}` (its own servers only). `GET /api/boxes` =
+`{me, hub, boxes:[{id, label, base, status: new|up|down, last_ok, gpus, models, added, via: added|joined, error}]}`
+(tokens never leave the hub). `POST /api/boxes {link}` links a box by its link (`#token=` optional: default this hub's
+token); its models become remote models `"<name> @ <label>"`, `base_url=<base>/api/relay/<port>/v1`,
+`api_key_env=SABHA_BOX_KEY_<ID>` (set in the hub's environment from `<data>/boxes.json`, 0600), concurrency 16 on a
+GPU of 40 GB or more. `POST /api/boxes/announce {link}` is the same, sent by a box started with `SABHA_JOIN=<hub link>`
+(at once, again when its link changes, and every 5 min). `POST /api/boxes/hub {link}` tells a box where its hub is
+(the hub sends it after a link change of its own). `DELETE /api/boxes/{id}` unlinks (removes its models here).
+Every 30 s each box is asked `GET /api/box` (older boxes: `/api/state` + `/api/boot`); new models are registered,
+models that vanish are kept (status goes down). Three missed polls: `status=down`, event `box.updated {box, what:
+linked|moved|down|up}` (app toast) and a `box` alert (an IMPORTANT kind, never a call). Answering again: `up`.
+The research engine routes over these models too (research/llm.py pool).

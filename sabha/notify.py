@@ -54,7 +54,7 @@ CHANNELS = {  # channel -> (fields, secret fields)
     "call": (("provider", "twilio_sid", "twilio_token", "twilio_from", "to", "telegram_user"), ("twilio_token",)),
 }
 LEVELS = ("all", "important", "off")
-IMPORTANT = {"link", "run_done", "problem", "session_ending"}
+IMPORTANT = {"link", "run_done", "problem", "session_ending", "box"}  # box: a linked box went down or came back
 CALL_EVENTS = {"run_done", "problem"}
 DEFAULT_LEVEL = {"ntfy": "all", "telegram": "all", "whatsapp": "important", "email": "important", "call": "important"}
 SECRET_ENV = {  # Kaggle / Colab secret name -> (channel, field); box.py imports these

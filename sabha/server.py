@@ -34,6 +34,7 @@ from .recall import Recall
 from .research_run import Runner, read_boot
 from .notify import Notifier
 from .nirmana import Nirmana, add_routes as add_nirmana_routes
+from .boxes import Boxes, add_routes as add_box_routes
 from .research_feed import ResearchFeed
 from . import catalog
 from .research import longmem
@@ -108,6 +109,7 @@ class Hub:
         self.feed = ResearchFeed(self)  # research work as live run events (sabha/research_feed.py)
         self.longmem_home = longmem.home_for(cfg.research_repo)
         self.nirmana = Nirmana(self)  # the workshop: models from the app, flows (sabha/nirmana.py)
+        self.boxes = Boxes(self)  # linked boxes: other boxes' models, and the hub this box reports to (sabha/boxes.py)
         self.sockets: set[web.WebSocketResponse] = set()
 
     async def start(self) -> None:
@@ -123,9 +125,11 @@ class Hub:
         self.telemetry.start()
         self.notifier.start()
         self.feed.start()
+        self.boxes.start()
         self.store.save_now()
 
     async def close(self) -> None:
+        await self.boxes.close()
         await self.nirmana.close()
         await self.notifier.close()
         await self.feed.close()
@@ -928,6 +932,7 @@ def create_app(hub: Hub) -> web.Application:
     add_research_routes(r, _hub, _body)
     add_library_routes(r, _hub, _body)
     add_nirmana_routes(r, _hub, _body)
+    add_box_routes(r, _hub, _body)
     r.add_get("/api/memory/search", memory_search)
     r.add_get("/api/memory/doc", memory_doc)
     r.add_get("/api/boot", get_boot)

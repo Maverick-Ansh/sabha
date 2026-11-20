@@ -118,6 +118,7 @@ export function apply(ev, live) {
   if (t === 'model.log') return emit('modellog', ev);
   if (t === 'council.delta') return emit('cdelta', ev);
   if (t.startsWith('nirmana.')) return emit('nirmana', ev);
+  if (t === 'box.updated') return emit('box', ev);
 
   if (t.startsWith('run.') || t.startsWith('plan.') || t.startsWith('human.')) {
     if (noteActivity(ev)) emit('activity', ev);

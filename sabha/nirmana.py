@@ -297,7 +297,11 @@ class Nirmana:
         if now - self._remote_at < 4 and self._remote_cache is not None:
             return self._remote_cache
         boxes: dict[str, dict] = {}
-        for m in self.hub.store.models.values():
+        for x in self.hub.boxes.boxes.values():  # linked boxes first (sabha/boxes.py): label, up/down, removable
+            boxes[x["base"]] = {"base": x["base"], "host": x["base"].split("//")[-1], "uses": [], "id": x["id"],
+                                "label": x.get("label"), "state": x.get("status"), "via": x.get("via"),
+                                "model": {"api_key_env": self.hub.boxes._env_name(x["id"])}}
+        for m in self.hub.store.models.values():  # and any model pointed at a relay by hand
             url = m.get("base_url") or ""
             if "/api/relay/" not in url:
                 continue
@@ -307,7 +311,8 @@ class Nirmana:
                               "port": int((url.split("/api/relay/")[1].split("/")[0] or 0) or 0)})
 
         async def one(b: dict) -> dict:
-            out = {"host": b["host"], "uses": b["uses"], "ok": False, "gpus": [], "servers": [], "error": ""}
+            out = {"host": b["host"], "uses": b["uses"], "ok": False, "gpus": [], "servers": [], "error": "",
+                   "id": b.get("id"), "label": b.get("label"), "state": b.get("state"), "via": b.get("via")}
             try:
                 async with self.hub.http.get(b["base"] + "/api/nirmana/forge", headers=auth_headers(b["model"]),
                                              timeout=aiohttp.ClientTimeout(total=5)) as r:
