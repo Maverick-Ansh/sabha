@@ -78,7 +78,7 @@ def make_patch(model: dict) -> str:
     # Compaction (dsh-compaction-basic) defaults are sized for very large windows: headroomTokens 65536 leaves a
     # 32k model a NEGATIVE pressure threshold, so it never compacted and long Work runs died 'max-tokens' with the
     # session full (seen: 26.8k of 32k, a 1-token reply). Scale everything to this model's window instead.
-    reply = min(4096, window // 8)
+    reply = min(8192, window // 4)  # a whole file in one write needs room: 4096 cut a 9B mid-file (fatal max-tokens at 14.9k)
     headroom = max(1024, window // 16)
     return (
         "- id: llm-pi-ai\n"
