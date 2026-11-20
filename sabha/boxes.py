@@ -227,6 +227,26 @@ class Boxes:
                 ids[port] = cur["id"]
             elif any(cur.get(k) != v for k, v in want.items() if k != "kind"):
                 self.hub.models.patch(cur["id"], {k: v for k, v in want.items() if k != "kind"})
+            # the same server under more roles (PATCH /api/boxes/{id} {"also": {"8001": ["reader"]}}): a big model also
+            # takes the reader's work; the box's relay asks its server for the name it really serves
+            for role in (b.get("also") or {}).get(port) or []:
+                if role == want["served_name"]:
+                    continue
+                alias = {**want, "name": f"{short} as {role} @ {b['label']}"[:80], "served_name": role,
+                         "concurrency": 10 if big else 4, "notes": want["notes"] + f", also serving the {role} role"}
+                key = f"{port}:{role}"
+                aid = ids.get(key)
+                acur = self.hub.store.models.get(aid) if aid else None
+                if acur is None:
+                    ids[key] = self.hub.models.create(alias)["id"]
+                elif any(acur.get(k) != v for k, v in alias.items() if k != "kind"):
+                    self.hub.models.patch(acur["id"], {k: v for k, v in alias.items() if k != "kind"})
+        for key in [k for k in ids if ":" in k]:  # an alias no longer wanted
+            port, role = key.split(":", 1)
+            if role not in ((b.get("also") or {}).get(port) or []):
+                mid = ids.pop(key)
+                if mid in self.hub.store.models:
+                    await self.hub.models.delete(mid)
         # a model gone from the box is kept (its status goes down): a box that restarts lists nothing for a while,
         # and deleting would unseat the crew. Removing the box removes its models.
         b["model_ids"] = ids
@@ -246,6 +266,21 @@ class Boxes:
                 await r.read()
         except Exception:  # noqa: BLE001 (an older box without the path, or down: the next poll tries again)
             pass
+
+    async def configure(self, bid: str, body: dict) -> dict:
+        """{also: {port: [roles]}}: serve a box's server under more roles here (e.g. a 27B as 'reader' too)."""
+        b = self.boxes.get(bid)
+        if b is None:
+            raise ApiError(404, "no such box")
+        if "also" in body:
+            also = body.get("also") or {}
+            if not isinstance(also, dict) or any(not str(p).isdigit() or not isinstance(rs, list)
+                                                 or any(r not in ("deep", "reader", "s1") for r in rs) for p, rs in also.items()):
+                raise ApiError(400, 'also must look like {"8001": ["reader"]} (roles: deep, reader, s1)')
+            b["also"] = {str(p): list(dict.fromkeys(rs)) for p, rs in also.items() if rs}
+        await self._poll(b)
+        self._save()
+        return {k: b.get(k) for k in ("id", "label", "base", "status", "also", "models")}
 
     def set_upstream(self, link: str) -> dict:
         base, tok = split_link(link)
@@ -385,3 +420,7 @@ def add_routes(r, hub_of, body_of) -> None:
     r.add_post("/api/boxes/hub", set_hub)
     r.add_delete("/api/boxes/{id}", remove)
     r.add_post("/api/box/update", update)
+
+    async def configure(request):
+        return web.json_response(await hub_of(request).boxes.configure(request.match_info["id"], await body_of(request)))
+    r.add_patch("/api/boxes/{id}", configure)

@@ -873,6 +873,16 @@ async def relay(request):
         raise ApiError(404, f"relay serves the local model ports {RELAY_PORTS.start}-{RELAY_PORTS.stop - 1} only")
     url = f"http://127.0.0.1:{port}/{request.match_info['tail']}"
     body = await request.read()
+    if body and request.method == "POST":  # the caller may know this server under another role (a 27B also used as
+        try:                               # 'reader'): ask for the name the server on this port really serves
+            served = next((m.get("served_name") for m in _hub(request).store.models.values()
+                           if (m.get("base_url") or "").rstrip("/") == f"http://127.0.0.1:{port}/v1" and m.get("served_name")), "")
+            obj = json.loads(body)
+            if served and isinstance(obj, dict) and obj.get("model") != served:
+                obj["model"] = served
+                body = json.dumps(obj).encode()
+        except ValueError:
+            pass
     hdr = {"Content-Type": request.headers.get("Content-Type", "application/json")}
     try:
         up = await _hub(request).http.request(request.method, url, params=request.query, data=body or None, headers=hdr,

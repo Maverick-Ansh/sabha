@@ -95,6 +95,13 @@ def main():
             out = json.loads(urllib.request.urlopen(req, timeout=10).read())
             check("2. a chat through A's registered URL reaches box B's model", out["choices"][0]["message"]["content"] == "hello from box B")
 
+        call(A_PORT, "PATCH", f"/api/boxes/{bid}", {"also": {str(FAKE): ["reader"]}})
+        al = [m for m in call(A_PORT, "GET", "/api/state")["models"] if m["served_name"] == "reader" and "/api/relay/" in m["base_url"]]
+        check(f"2b. 'also' adds the same server as a reader ({al and al[0]['name']}, concurrency {al and al[0].get('concurrency')})", len(al) == 1)
+        call(A_PORT, "PATCH", f"/api/boxes/{bid}", {"also": {}})
+        al = [m for m in call(A_PORT, "GET", "/api/state")["models"] if m["served_name"] == "reader" and "/api/relay/" in m["base_url"]]
+        check("2b. clearing 'also' removes the alias", not al)
+
         b.terminate(); b.wait(10)
         down = wait(lambda: call(A_PORT, "GET", "/api/boxes")["boxes"][0]["status"] == "down", 30)
         check("3. B stopped: A marks it down", bool(down))
