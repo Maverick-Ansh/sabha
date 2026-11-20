@@ -196,6 +196,7 @@ async def _stream_chat(
         "model": model.get("served_name") or model.get("name"),
         "messages": messages,
         "stream": True,
+        "stream_options": {"include_usage": True},  # token counts for Conversations and the stats
     }
     if max_tokens:
         body["max_tokens"] = max_tokens
