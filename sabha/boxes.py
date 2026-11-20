@@ -67,13 +67,16 @@ class Boxes:
         for b in self.boxes.values():
             b.update(fails=0, status=b.get("status") or "new")
             self._key_env(b)
+        # SABHA_JOIN is only the FIRST hub link: it stays in the environment of every later hub restart, while the hub
+        # itself moves (and tells us, POST /api/boxes/hub). A new SABHA_JOIN value (another cell run) does count.
         join = os.environ.get("SABHA_JOIN") or ""
-        if join:
+        if join and join != d.get("join_seen"):
             try:
                 base, tok = split_link(join)
                 self.upstream = {"base": base, "token": tok or hub.cfg.token}
             except ApiError:
                 log.warning("SABHA_JOIN is not a Sabha link: %r", join[:80])
+        self._join_seen = join or d.get("join_seen") or ""
         self._save()
 
     # ------------------------------------------------------------ files
@@ -86,7 +89,8 @@ class Boxes:
 
     def _save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"my_id": self.my_id, "boxes": self.boxes, "hub": self.upstream}, indent=1), "utf-8")
+        tmp.write_text(json.dumps({"my_id": self.my_id, "boxes": self.boxes, "hub": self.upstream,
+                                   "join_seen": getattr(self, "_join_seen", "")}, indent=1), "utf-8")
         os.replace(tmp, self.path)
         try:
             os.chmod(self.path, 0o600)
