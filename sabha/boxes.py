@@ -176,6 +176,7 @@ class Boxes:
         if bid == self.my_id:
             raise ApiError(400, "that is this box's own link")
         b = self.boxes.get(bid)
+        is_new = b is None
         if b is None:
             b = self.boxes[bid] = {"id": bid, "added": time.time(), "via": via,
                                    "label": self._label(info, len(self.boxes) + 2)}
@@ -184,7 +185,8 @@ class Boxes:
         self._key_env(b)
         await self._sync(b, info)
         self._save()
-        self._emit(b, "linked" if not moved else "moved")
+        if is_new or moved:  # a box re-announces every 5 min: only a new box or a new link is news
+            self._emit(b, "linked" if is_new else "moved")
         asyncio.ensure_future(self._tell(b))
         return {k: b.get(k) for k in ("id", "label", "base", "status", "gpus", "models")}
 

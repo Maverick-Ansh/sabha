@@ -19,7 +19,8 @@ export function setMuted(v) {
 // toast('Title', { sub, tone: 'sun'|'mint'|'coral', actions: [{label, onClick}], timeout })
 export function toast(title, opts = {}) {
   if (!toastsEl) { toastsEl = h('div.toasts', { role: 'status', 'aria-live': 'polite' }); document.body.appendChild(toastsEl); }
-  const el = h('div', { class: 'toast ' + (opts.tone || '') },
+  for (const old of Array.from(toastsEl.children)) if (old.dataset.key === title) old.remove();  // the same note again replaces it
+  const el = h('div', { class: 'toast ' + (opts.tone || ''), 'data-key': title, title: opts.sub ? `${title}: ${opts.sub}` : title },
     h('span.t-mark'),
     h('div.t-body', null, h('div.t-title', null, title), opts.sub ? h('div.t-sub', null, opts.sub) : null),
     (opts.actions || []).map((a) => h('button.btn.sm', { onclick: () => { a.onClick(); dismiss(); } }, a.label)),
@@ -31,7 +32,7 @@ export function toast(title, opts = {}) {
     setTimeout(() => el.remove(), 260);
   }
   toastsEl.appendChild(el);
-  while (toastsEl.children.length > 4) toastsEl.firstChild.remove();
+  while (toastsEl.children.length > 3) toastsEl.firstChild.remove();
   const t = opts.timeout === 0 ? 0 : (opts.timeout || 6500);
   if (t) setTimeout(dismiss, t);
   return dismiss;
