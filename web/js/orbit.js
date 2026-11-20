@@ -365,11 +365,7 @@ export function createOrbit(canvas, { onFocus, onResearch } = {}) {
     for (const o of orbs.values()) {
       const work = working(o.id) || clock - (o.lastEv || -99) < 6;
       if (isR(o.id)) o.radius = R * (o.band || 0.88);
-      if (isR(o.id) && work && clock - (o.lastSpark || -9) > 2.6) {  // a research agent at work: a spark to its station
-        o.lastSpark = clock;
-        const st = (research.get(o.id) || {}).station || 'think', rgb = o.rgb;
-        spark(() => orbPos(o.id), () => stationPos(st), rgb, { size: 0.8, arrive: () => pulse(st, rgb) });
-      }
+      // (no decorative sparks: every moving dot is a real event from onEvent; a working research orb just glows)
       o.energy += ((work ? 1 : 0) - o.energy) * Math.min(1, dt * 1.6);
       o.kick = Math.max(0, o.kick - dt * 1.8);
       o.dir = 1;
