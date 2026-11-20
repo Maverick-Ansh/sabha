@@ -74,6 +74,12 @@ def make_patch(model: dict) -> str:
     """patch.yml for one run. Written by hand; JSON strings are valid YAML scalars."""
     q = json.dumps
     served = model.get("served_name") or model.get("name") or "model"
+    window = int(model.get("context_window") or 32768)
+    # Compaction (dsh-compaction-basic) defaults are sized for very large windows: headroomTokens 65536 leaves a
+    # 32k model a NEGATIVE pressure threshold, so it never compacted and long Work runs died 'max-tokens' with the
+    # session full (seen: 26.8k of 32k, a 1-token reply). Scale everything to this model's window instead.
+    reply = min(4096, window // 8)
+    headroom = max(1024, window // 16)
     return (
         "- id: llm-pi-ai\n"
         "  config:\n"
@@ -85,11 +91,18 @@ def make_patch(model: dict) -> str:
         f"        baseURL: {q(model.get('base_url') or '')}\n"
         "        models:\n"
         f"          - id: {q(served)}\n"
-        f"            contextWindow: {int(model.get('context_window') or 32768)}\n"
+        f"            contextWindow: {window}\n"
+        f"            maxTokens: {reply}\n"
         "- id: agent-default-model\n"
         "  config:\n"
         "    provider: sabha\n"
         f"    model: {q(served)}\n"
+        "- id: compaction-basic\n"
+        "  config:\n"
+        "    thresholdRatio: 0.7\n"
+        f"    headroomTokens: {headroom}\n"
+        "    retainRatio: 0.2\n"
+        f"    maxTokens: {min(2048, reply)}\n"
     )
 
 
