@@ -13,6 +13,9 @@ REASP=${SABHA_REASONING_PARSER-qwen3}  # empty = off (a model family without a k
 EXTRA=(); [ -n "$REASP" ] && EXTRA+=(--reasoning-parser "$REASP")
 [ "${SABHA_MM:-1}" = 1 ] && EXTRA+=(--limit-mm-per-prompt '{"image":0,"video":0}')  # multimodal checkpoints: text only
 TP=${SABHA_TP:-1}; [ "$TP" -gt 1 ] && EXTRA+=(--tensor-parallel-size "$TP")       # GPU may be a list: 0,1
+# FlashInfer's top-k/top-p sampler JIT-compiles on the first request and needs ninja + nvcc, which the Colab and
+# Kaggle images lack (A100 crash "No such file or directory: 'ninja'"). vLLM's own sampler needs no compile.
+export VLLM_USE_FLASHINFER_SAMPLER=${VLLM_USE_FLASHINFER_SAMPLER:-0}
 DTYPE=${SABHA_DTYPE:-float16}                                                    # T4 has no bf16; A100 and newer: auto
 ATTN=${SABHA_ATTN-}; [ -z "$ATTN" ] && [ "$DTYPE" = float16 ] && ATTN=TRITON_ATTN  # sm75: FlexAttention is ~5x slower
 VLLM=${VLLM:-/opt/vllm/bin/vllm}

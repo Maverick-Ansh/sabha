@@ -860,6 +860,17 @@ def main(argv: list[str]) -> int:
     if cmd == "stop":
         stop()
         return 0
+    if cmd == "update":  # box.py update [models] [hub]: what POST /api/box/update runs after its git pull
+        want = set(argv[2:])
+        time.sleep(2)  # the hub answers the request first
+        if "models" in want:  # the supervisor relaunches each server with the new serve.sh within seconds
+            for m in layout(gpus())[0]:
+                say(f"update: restarting the {m['role']} server")
+                stop_server(m["role"], m["port"])
+        if "hub" in want:  # a new hub process on the new code; linked boxes and the hub find each other again by themselves
+            os.environ.update(SABHA_NEW_LINK="1", SABHA_KEEPALIVE="0")
+            up()
+        return 0
     say(__doc__)
     return 2
 

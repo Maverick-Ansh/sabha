@@ -23,6 +23,8 @@ import logging
 import os
 import re
 import secrets
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -345,9 +347,35 @@ def add_routes(r, hub_of, body_of) -> None:
     async def remove(request):
         return web.json_response(await hub_of(request).boxes.remove(request.match_info["id"]))
 
+    async def update(request):
+        """{models?: bool, hub?: bool}: git pull this box's Sabha, then restart its model servers and/or its hub on the
+        new code (box.py update, detached so it outlives the hub it restarts). The way to upgrade a box over its link."""
+        body = await body_of(request)
+        app = str(Path(__file__).resolve().parent.parent)
+
+        def pull() -> dict:
+            def git(*a):
+                r = subprocess.run(["git", "-C", app, *a], capture_output=True, text=True, timeout=90)
+                return r.returncode, (r.stdout + r.stderr).strip()
+            _, before = git("rev-parse", "--short", "HEAD")
+            rc, out = git("pull", "-q", "--ff-only")
+            _, after = git("rev-parse", "--short", "HEAD")
+            return {"before": before, "after": after, "ok": rc == 0, "log": out[-400:]}
+        res = await asyncio.to_thread(pull)
+        want = [w for w in ("models", "hub") if body.get(w)]
+        if want and res["ok"]:
+            box_py = os.path.join(app, "sabha", "box.py")
+            logs = os.path.join(hub_of(request).cfg.data_dir, "logs")
+            os.makedirs(logs, exist_ok=True)
+            with open(os.path.join(logs, "update.log"), "ab") as f:
+                subprocess.Popen([sys.executable, box_py, "update", *want], cwd=app, env=dict(os.environ), stdin=subprocess.DEVNULL,
+                                 stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
+        return web.json_response({**res, "restarting": want if res["ok"] else []})
+
     r.add_get("/api/box", me)
     r.add_get("/api/boxes", listing)
     r.add_post("/api/boxes", add)
     r.add_post("/api/boxes/announce", announce)
     r.add_post("/api/boxes/hub", set_hub)
     r.add_delete("/api/boxes/{id}", remove)
+    r.add_post("/api/box/update", update)
