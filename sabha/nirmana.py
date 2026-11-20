@@ -32,9 +32,11 @@ import re
 import time
 from pathlib import Path
 
+import aiohttp
 from aiohttp import web
 
 from . import catalog, webtools
+from .models import auth_headers
 from .research_run import read_boot
 from .talk import ChatError, stream_chat
 from .util import ApiError, mock_speed, new_id, now, short
@@ -105,6 +107,8 @@ class Nirmana:
         self.runs: dict[str, dict] = {}
         self._last: dict[str, tuple[float, dict]] = {}  # role -> (ts, counters) for tokens per second
         self._spark: dict[str, list[float]] = {}
+        self._remote_cache: list[dict] | None = None
+        self._remote_at = 0.0
         self._load_runs()
 
     # ------------------------------------------------------------ files
@@ -283,7 +287,43 @@ class Nirmana:
                          "temp_c": t.get("temp_c") or t.get("temperature"), "share": round(share, 3),
                          "free_share": round(max(0.92 - share, 0.0), 3)})
         return {"gpus": gout, "servers": out, "demo": self.hub.cfg.demo, "by": lay.get("by", ""),
-                "hf_token": bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))}
+                "hf_token": bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")),
+                "remote": await self._remote_boxes()}
+
+    async def _remote_boxes(self) -> list[dict]:
+        """Other boxes whose models this hub uses through their /api/relay (multiKaggle): each box's own forge
+        (GPUs with memory in use, servers with live numbers), fetched through its link. Cached 4 s."""
+        now = time.time()
+        if now - self._remote_at < 4 and self._remote_cache is not None:
+            return self._remote_cache
+        boxes: dict[str, dict] = {}
+        for m in self.hub.store.models.values():
+            url = m.get("base_url") or ""
+            if "/api/relay/" not in url:
+                continue
+            base = url.split("/api/relay/")[0]
+            b = boxes.setdefault(base, {"base": base, "host": base.split("//")[-1], "model": m, "uses": []})
+            b["uses"].append({"name": m.get("name"), "status": m.get("status"), "id": m.get("id"),
+                              "port": int((url.split("/api/relay/")[1].split("/")[0] or 0) or 0)})
+
+        async def one(b: dict) -> dict:
+            out = {"host": b["host"], "uses": b["uses"], "ok": False, "gpus": [], "servers": [], "error": ""}
+            try:
+                async with self.hub.http.get(b["base"] + "/api/nirmana/forge", headers=auth_headers(b["model"]),
+                                             timeout=aiohttp.ClientTimeout(total=5)) as r:
+                    if r.status != 200:
+                        out["error"] = f"box answered {r.status}"
+                        return out
+                    f = await r.json()
+                out.update(ok=True, gpus=f.get("gpus") or [], servers=[{k: s.get(k) for k in (
+                    "role", "label", "hf", "gpus", "status", "detail", "secs", "expect_s", "ctx", "util", "weights_gib", "tp",
+                    "port", "live")} for s in f.get("servers") or []])
+            except Exception as e:  # noqa: BLE001 (tunnel down, box gone: show it as unreachable)
+                out["error"] = f"unreachable ({e.__class__.__name__})"
+            return out
+        res = list(await asyncio.gather(*(one(b) for b in boxes.values()))) if boxes and self.hub.http else []
+        self._remote_cache, self._remote_at = res, now
+        return res
 
     def _save_layout(self, servers: list[dict], why: str) -> None:
         for s in servers:

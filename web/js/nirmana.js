@@ -53,8 +53,12 @@ export function createNirmana() {
   const gridEl = h('div.nm-grid');
   const byEl = h('p.nm-by');
   const defaultEl = h('div.nm-default');
+  const remoteEl = h('div.nm-remote');
+  const remoteSec = h('section.nm-sec', { hidden: true }, h('div.nm-sec-h', null, h('h2', null, 'Other boxes'),
+    h('p.nm-by', null, 'Linked through their own link. Load or change their models in their own Sabha.')), remoteEl);
   modelsEl.append(
     h('section.nm-sec', null, h('div.nm-sec-h', null, h('h2', null, 'The box'), byEl), vesselsEl, defaultEl),
+    remoteSec,
     h('section.nm-sec', null, h('div.nm-sec-h', null, h('h2', null, 'Instruments'),
       h('button.btn.brand.sm', { onclick: () => openLoad() }, icon('plus', 14), 'Load a model')), gridEl));
   const cards = new Map(); // role -> card api
@@ -99,11 +103,47 @@ export function createNirmana() {
   function paintVessels() {
     setText(byEl, forge.by ? forge.by.replace(/^Nirmana: /, 'Last change: ') : '');
     clear(vesselsEl);
-    if (!forge.gpus.length) { vesselsEl.append(h('div.empty-note', null, 'No GPU on this box. Models need a GPU session (Kaggle: GPU T4 x2).')); return; }
-    for (const g of forge.gpus) {
+    if (!forge.gpus.length) { vesselsEl.append(h('div.empty-note', null, 'No GPU on this box. Models need a GPU session (Kaggle: GPU T4 x2).')); }
+    else drawVessels(vesselsEl, forge);
+    paintRemote();
+  }
+
+  // ---------- other boxes this hub uses through their link (multiKaggle): read only, live from each box ----------
+  function paintRemote() {
+    const boxes = forge.remote || [];
+    remoteSec.hidden = !boxes.length;
+    clear(remoteEl);
+    boxes.forEach((b, bi) => {
+      const gpuTxt = b.gpus.length ? `${b.gpus.length}× ${b.gpus[0].name.replace(/NVIDIA |Tesla |-SXM4/g, '')}` : '';
+      const total = b.gpus.reduce((a, g) => a + g.mem_mb, 0) / 1024;
+      const rows = b.servers.map((s) => {
+        const lv = s.live || {};
+        const use = b.uses.find((u) => u.port === s.port);
+        return h('div.nm-rrow', null,
+          h('span.nm-dot', { class: `st-${s.status}` }),
+          h('b', null, s.label || short(s.hf)),
+          h('span.nm-chip', null, `GPU ${(s.gpus || []).join('+')}`),
+          h('span.micro', null, s.status === 'ready'
+            ? `KV ${lv.kv_pct ?? 0}% · ${lv.running ?? 0} running${lv.waiting ? ` · ${lv.waiting} waiting` : ''} · ${lv.gen_tps ?? 0} tok/s`
+            : `${s.status}${s.detail ? ' · ' + String(s.detail).slice(0, 80) : ''}`),
+          h('span.micro.nm-ruse', null, use ? `here: ${use.name}` : 'not used here'));
+      });
+      const vs = h('div.nm-vessels');
+      if (b.ok && b.gpus.length) drawVessels(vs, b);
+      remoteEl.append(h('div.nm-rbox.card', null,
+        h('div.nm-v-top', null,
+          h('span.nm-v-name', null, `Box ${bi + 2}${gpuTxt ? ' · ' + gpuTxt : ''}`),
+          h('span.nm-v-chip.mono', null, b.ok ? `${total.toFixed(0)} GB` : b.error || 'unreachable')),
+        h('p.micro.mono.nm-rhost', null, b.host),
+        vs, h('div.nm-rrows', null, rows.length ? rows : h('div.empty-note', null, b.ok ? 'No models on this box yet.' : 'This box does not answer: its tunnel may have changed.'))));
+    });
+  }
+
+  function drawVessels(into, f) {
+    for (const g of f.gpus) {
       const totalGb = g.mem_mb / 1024;
       const usedGb = (g.mem_used_mb || 0) / 1024;
-      const on = forge.servers.map((s, i) => [s, i]).filter(([s]) => (s.gpus || []).includes(g.index));
+      const on = f.servers.map((s, i) => [s, i]).filter(([s]) => (s.gpus || []).includes(g.index));
       const bands = on.map(([s, i]) => {
         const share = Number(s.util || 0);
         const w = Math.min(s.weights_gib / (s.tp || 1) / totalGb, share);
@@ -113,7 +153,7 @@ export function createNirmana() {
       });
       const free = Math.max(0.92 - (g.share || 0), 0);
       if (free > 0.05) bands.push(h('div.nm-band.free', { style: { flexGrow: String(free) } }, h('span.nm-band-l', null, 'free')));
-      vesselsEl.append(h('div.nm-vessel.card', null,
+      into.append(h('div.nm-vessel.card', null,
         h('div.nm-v-top', null, h('span.nm-v-name', null, `GPU ${g.index}`), h('span.nm-v-chip.mono', null, g.name.replace(/NVIDIA |Tesla /g, ''))),
         h('div.nm-v-glass', null, h('div.nm-v-stack', null, bands),
           h('div.nm-v-level', { style: { bottom: `${Math.min(usedGb / totalGb, 1) * 100}%` }, title: 'memory in use right now' })),

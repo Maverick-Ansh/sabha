@@ -327,3 +327,15 @@
 .nm-default-chip { font-size: 12.5px; padding: 4px 10px; border-radius: var(--r-pill); background: rgba(var(--ink-rgb), .06); color: var(--ink-2); }
 .nm-default-chip b { color: var(--ink); font-weight: 650; }
 .nm-default-src { font-size: 12px; color: var(--ink-3); }
+
+/* other boxes (multiKaggle): one card per linked box, its GPUs drawn like ours, a row per model */
+.nm-remote { display: grid; gap: 16px; }
+.nm-rbox { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.nm-rhost { margin: -6px 0 0; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-rbox .nm-vessel { box-shadow: none; background: rgba(0, 0, 0, .025); }
+.nm-rrows { display: grid; gap: 8px; }
+.nm-rrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: 13px; --hue-rgb: 10, 132, 255; --hue-deep: #0a5bd6; }
+.nm-rrow .nm-ruse { margin-left: auto; color: var(--ink-3); }
+.nm-rrow .nm-dot.st-ready { background: var(--st-done); box-shadow: 0 0 0 3px rgba(var(--mint-rgb), .25); }
+.nm-rrow .nm-dot.st-starting, .nm-rrow .nm-dot.st-pending, .nm-rrow .nm-dot.st-downloading { background: var(--st-running); animation: nm-breathe 1.4s infinite; }
+.nm-rrow .nm-dot.st-failed { background: var(--st-failed); }
