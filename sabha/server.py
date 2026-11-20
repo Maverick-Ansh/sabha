@@ -854,6 +854,36 @@ async def static_handler(request):
     return web.Response(text=PLACEHOLDER, content_type="text/html", headers=NO_CACHE)
 
 
+# ---- relay: another box reaches this box's model servers through this hub's link (multiKaggle worker)
+# Behind the hub token like every /api path. Only the local model ports, never an arbitrary address.
+RELAY_PORTS = range(8000, 8010)
+
+
+async def relay(request):
+    try:
+        port = int(request.match_info["port"])
+    except ValueError:
+        port = -1
+    if port not in RELAY_PORTS:
+        raise ApiError(404, f"relay serves the local model ports {RELAY_PORTS.start}-{RELAY_PORTS.stop - 1} only")
+    url = f"http://127.0.0.1:{port}/{request.match_info['tail']}"
+    body = await request.read()
+    hdr = {"Content-Type": request.headers.get("Content-Type", "application/json")}
+    try:
+        up = await _hub(request).http.request(request.method, url, params=request.query, data=body or None, headers=hdr,
+                                              timeout=aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=900))
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        raise ApiError(502, f"no model server answers on port {port}: {e.__class__.__name__}")
+    async with up:
+        resp = web.StreamResponse(status=up.status, headers={"Content-Type": up.headers.get("Content-Type", "application/json"),
+                                                             "Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        await resp.prepare(request)
+        async for chunk in up.content.iter_any():  # chat streams (SSE) pass through as they come
+            await resp.write(chunk)
+        await resp.write_eof()
+        return resp
+
+
 # ---------------------------------------------------------------- app
 
 
@@ -862,6 +892,7 @@ def create_app(hub: Hub) -> web.Application:
     app[HUB_KEY] = hub
     r = app.router
     r.add_get("/api/state", get_state)
+    r.add_route("*", "/api/relay/{port}/{tail:.*}", relay)
     r.add_post("/api/models", create_model)
     r.add_patch("/api/models/{id}", patch_model)
     r.add_delete("/api/models/{id}", delete_model)

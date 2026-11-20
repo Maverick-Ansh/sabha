@@ -703,3 +703,11 @@ Notebook secrets with the same names (`SABHA_GIT_REPO`, `SABHA_GIT_TOKEN`, `TAVI
 New research empties the question field (the taste and loved papers stay). In Watch, the Everyone stream's left edge
 drags to resize and a double-click folds it away (a tab brings it back); the width is kept per browser
 (`sabha.watch.sizes`). The timeline keeps its fixed height at the bottom.
+
+## 19. Relay to this box's model servers (multiKaggle worker)
+
+`* /api/relay/{port}/{path}` forwards the request (method, query, body) to `http://127.0.0.1:{port}/{path}` and streams the
+answer back unchanged (SSE passes through). Behind the hub token like every `/api` path. Ports 8000-8009 only (404 for
+others, 502 when nothing answers). Another box uses it by registering a model with
+`base_url = https://<this box's link>/api/relay/<port>/v1` and `api_key_env` naming an environment variable that holds
+this box's token (two boxes started with the same `SABHA_TOKEN` use `api_key_env = "SABHA_TOKEN"`).
